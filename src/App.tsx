@@ -1,696 +1,479 @@
-
-import { useMemo, useState } from "react";
-import { Canvas } from "@react-three/fiber";
-import { Float, Line, OrbitControls, Stars } from "@react-three/drei";
+import { useState, useMemo, lazy, Suspense } from "react";
 import {
-  Activity,
-  ArrowRight,
-  CheckCircle2,
   Cpu,
-  FlaskConical,
-  Play,
   RotateCcw,
-  ShieldAlert,
-  ShieldCheck,
-  Terminal,
-  XCircle,
+  AlertTriangle,
+  Activity,
 } from "lucide-react";
+import type { SimulationStage, SimulationModel } from "./types/simulation";
 import {
-  calculateNeed,
-  runSafetyAlgorithm,
-  type BankerInput,
-} from "./algorithm/banker";
+  CLASSIC_5X3_PRESET,
+  UNSAFE_PRESET,
+  createDefaultProcessNames,
+  createDefaultResourceNames,
+  createEmptyMatrix,
+  createEmptyVector,
+} from "./data/presets";
+import { STAGE_DIALOGUES } from "./data/dialogues";
+import { calculateNeed, runSafetyAlgorithm, type SafetyResult } from "./algorithm/banker";
+
+import StageNavigation from "./components/StageNavigation";
+import WelcomeStage from "./components/WelcomeStage";
+import SystemConfigStage from "./components/SystemConfigStage";
+import ProcessNamingStage from "./components/ProcessNamingStage";
+import ResourceNamingStage from "./components/ResourceNamingStage";
+import MatrixEditorStage from "./components/MatrixEditorStage";
+import SafetyAnalysisStage from "./components/SafetyAnalysisStage";
+import LisaAssistant from "./components/LisaAssistant";
 import "./App.css";
 
-const INITIAL_INPUT: BankerInput = {
-  allocation: [
-    [0, 1, 0],
-    [2, 0, 0],
-    [3, 0, 2],
-    [2, 1, 1],
-    [0, 0, 2],
-  ],
-  max: [
-    [7, 5, 3],
-    [3, 2, 2],
-    [9, 0, 2],
-    [2, 2, 2],
-    [4, 3, 3],
-  ],
-  available: [3, 3, 2],
-};
+// Lazy load 3D Scene to keep initial bundle ultra-lean
+const Simulation3DStage = lazy(
+  () => import("./components/Simulation3DStage"),
+);
 
-const RESOURCE_NAMES = ["Resource A", "Resource B", "Resource C"];
-const RESOURCE_COLORS = ["#67e8f9", "#a78bfa", "#34d399"];
-
-const PROCESS_POSITIONS: [number, number, number][] = [
-  [-2.4, 1.35, 0],
-  [-1.15, -1.35, 0.4],
-  [0, 1.7, -0.3],
-  [1.25, -1.25, 0.3],
-  [2.4, 1.2, 0],
+const RESOURCE_COLOR_PALETTE = [
+  "#55e8ff", // cyan
+  "#a78bfa", // purple
+  "#55f0b5", // emerald green
+  "#f472b6", // rose
+  "#fbbf24", // amber
+  "#60a5fa", // sky blue
 ];
 
-const RESOURCE_POSITIONS: [number, number, number][] = [
-  [-3.1, 0, 0],
-  [0, 0, -0.5],
-  [3.1, 0, 0],
-];
-
-function cloneInput(input: BankerInput): BankerInput {
-  return {
-    allocation: input.allocation.map((row) => [...row]),
-    max: input.max.map((row) => [...row]),
-    available: [...input.available],
-  };
-}
-
-function ResourceScene({
-  allocation,
-  activeProcess,
-  completedProcesses,
-}: {
-  allocation: number[][];
-  activeProcess: number | null;
-  completedProcesses: number[];
-}) {
-  return (
-    <Canvas camera={{ position: [0, 0.3, 9], fov: 48 }}>
-      <color attach="background" args={["#070b14"]} />
-      <ambientLight intensity={1.1} />
-      <pointLight position={[0, 4, 5]} intensity={35} color="#67e8f9" />
-      <pointLight position={[-4, -2, 3]} intensity={20} color="#8b5cf6" />
-      <Stars radius={70} depth={35} count={1600} factor={2} fade speed={0.5} />
-
-      {RESOURCE_POSITIONS.map((resourcePosition, resourceIndex) => (
-        <group key={`resource-${resourceIndex}`} position={resourcePosition}>
-          <Float speed={1.2 + resourceIndex * 0.25} rotationIntensity={0.3} floatIntensity={0.5}>
-            <mesh>
-              <icosahedronGeometry args={[0.48, 1]} />
-              <meshStandardMaterial
-                color={RESOURCE_COLORS[resourceIndex]}
-                emissive={RESOURCE_COLORS[resourceIndex]}
-                emissiveIntensity={0.45}
-                metalness={0.65}
-                roughness={0.2}
-                wireframe
-              />
-            </mesh>
-          </Float>
-        </group>
-      ))}
-
-      {PROCESS_POSITIONS.map((position, processIndex) => {
-        const isActive = activeProcess === processIndex;
-        const isCompleted = completedProcesses.includes(processIndex);
-        const nodeColor = isActive
-          ? "#facc15"
-          : isCompleted
-            ? "#34d399"
-            : "#a78bfa";
-
-        return (
-          <group key={`process-${processIndex}`} position={position}>
-            {RESOURCE_POSITIONS.map((resourcePosition, resourceIndex) => {
-              if (!allocation[processIndex]?.[resourceIndex]) return null;
-
-              return (
-                <Line
-                  key={`edge-${processIndex}-${resourceIndex}`}
-                  points={[ [0, 0, 0], [
-                    resourcePosition[0] - position[0],
-                    resourcePosition[1] - position[1],
-                    resourcePosition[2] - position[2],
-                  ] ]}
-                  color={RESOURCE_COLORS[resourceIndex]}
-                  lineWidth={1 + allocation[processIndex][resourceIndex] * 0.35}
-                  transparent
-                  opacity={isActive || isCompleted ? 0.8 : 0.25}
-                />
-              );
-            })}
-
-            <Float speed={1.5} rotationIntensity={0.2} floatIntensity={0.3}>
-              <mesh>
-                <sphereGeometry args={[0.19, 24, 24]} />
-                <meshStandardMaterial
-                  color={nodeColor}
-                  emissive={nodeColor}
-                  emissiveIntensity={isActive ? 1.8 : 0.65}
-                  metalness={0.4}
-                  roughness={0.25}
-                />
-              </mesh>
-              <mesh rotation={[Math.PI / 2, 0, 0]}>
-                <torusGeometry args={[0.31, 0.018, 8, 40]} />
-                <meshBasicMaterial color={nodeColor} transparent opacity={0.8} />
-              </mesh>
-            </Float>
-          </group>
-        );
-      })}
-
-      <OrbitControls
-        enablePan={false}
-        minDistance={6}
-        maxDistance={13}
-        autoRotate
-        autoRotateSpeed={0.35}
-      />
-    </Canvas>
+export default function App() {
+  const [stage, setStage] = useState<SimulationStage>("WELCOME");
+  const [model, setModel] = useState<SimulationModel>(() =>
+    structuredClone(CLASSIC_5X3_PRESET),
   );
-}
+  const [dialogue, setDialogue] = useState<string>(STAGE_DIALOGUES.WELCOME);
+  const [showResetModal, setShowResetModal] = useState(false);
 
-function NumberCell({
-  value,
-  onChange,
-  label,
-}: {
-  value: number;
-  onChange: (value: number) => void;
-  label: string;
-}) {
-  return (
-    <input
-      className="matrix-input"
-      type="number"
-      min={0}
-      step={1}
-      aria-label={label}
-      value={value}
-      onChange={(event) => {
-        const next = Number(event.target.value);
-        if (Number.isSafeInteger(next) && next >= 0) onChange(next);
-        if (event.target.value === "") onChange(0);
-      }}
-    />
-  );
-}
-
-function App() {
-  const [input, setInput] = useState<BankerInput>(() => cloneInput(INITIAL_INPUT));
-  const [stepIndex, setStepIndex] = useState(0);
-  const [processChoice, setProcessChoice] = useState(1);
-  const [request, setRequest] = useState([1, 0, 2]);
-  const [requestMessage, setRequestMessage] = useState<{
-    type: "success" | "error" | "info";
-    title: string;
-    detail: string;
-  } | null>(null);
-
-  const need = useMemo(
-    () => calculateNeed(input.allocation, input.max),
-    [input.allocation, input.max],
-  );
-
-  const result = useMemo(() => {
+  // Compute safety result whenever model matrices change
+  const safetyResult: SafetyResult | null = useMemo(() => {
     try {
-      return runSafetyAlgorithm(input);
+      calculateNeed(model.allocation, model.max);
+      return runSafetyAlgorithm({
+        allocation: model.allocation,
+        max: model.max,
+        available: model.available,
+      });
     } catch {
       return null;
     }
-  }, [input]);
+  }, [model.allocation, model.max, model.available]);
 
-  const currentStep =
-    result && stepIndex > 0 ? result.steps[stepIndex - 1] ?? null : null;
+  // Stage transition helper
+  const navigateTo = (nextStage: SimulationStage, customDialogue?: string) => {
+    setStage(nextStage);
+    setDialogue(customDialogue ?? STAGE_DIALOGUES[nextStage]);
+  };
 
-  const activeProcess = currentStep?.process ?? null;
-  const completedProcesses = result
-    ? result.steps.slice(0, stepIndex).map((step) => step.process)
-    : [];
+  // Stage accessibility guard
+  const canNavigateTo = (targetStage: SimulationStage): boolean => {
+    if (targetStage === "WELCOME") return true;
+    if (targetStage === "SYSTEM_CONFIG") return true;
+    if (targetStage === "PROCESS_NAMING") return model.processCount > 0;
+    if (targetStage === "RESOURCE_NAMING")
+      return model.processNames.length === model.processCount;
+    if (targetStage === "ALLOCATION_INPUT")
+      return model.resourceNames.length === model.resourceCount;
+    if (targetStage === "SAFETY_ANALYSIS") {
+      try {
+        calculateNeed(model.allocation, model.max);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    if (targetStage === "SIMULATION_3D") {
+      return safetyResult !== null;
+    }
+    return false;
+  };
 
-  function updateMatrix(
-    matrixName: "allocation" | "max",
-    row: number,
-    column: number,
-    value: number,
-  ) {
-    setInput((previous) => {
-      const next = cloneInput(previous);
-      next[matrixName][row][column] = value;
-      return next;
+  // Voice and text command dispatcher
+  const handleVoiceCommand = (rawCommand: string) => {
+    const cmd = rawCommand.toLowerCase().trim();
+
+    if (cmd.includes("start") || cmd.includes("begin")) {
+      if (stage === "WELCOME") {
+        navigateTo("SYSTEM_CONFIG");
+      }
+      return;
+    }
+
+    if (cmd.includes("classic") || cmd.includes("textbook")) {
+      setModel(structuredClone(CLASSIC_5X3_PRESET));
+      navigateTo(
+        "SAFETY_ANALYSIS",
+        "Classic 5 processes and 3 resources dataset loaded. Let's analyze its safety sequence.",
+      );
+      return;
+    }
+
+    if (cmd.includes("unsafe") || cmd.includes("deadlock")) {
+      setModel(structuredClone(UNSAFE_PRESET));
+      navigateTo(
+        "SAFETY_ANALYSIS",
+        "Unsafe dataset loaded. Notice how the safety algorithm detects deadlock risk.",
+      );
+      return;
+    }
+
+    if (cmd.includes("next") || cmd.includes("continue")) {
+      if (stage === "WELCOME") navigateTo("SYSTEM_CONFIG");
+      else if (stage === "SYSTEM_CONFIG") navigateTo("PROCESS_NAMING");
+      else if (stage === "PROCESS_NAMING") navigateTo("RESOURCE_NAMING");
+      else if (stage === "RESOURCE_NAMING") navigateTo("ALLOCATION_INPUT");
+      else if (stage === "ALLOCATION_INPUT" && canNavigateTo("SAFETY_ANALYSIS"))
+        navigateTo("SAFETY_ANALYSIS");
+      else if (stage === "SAFETY_ANALYSIS" && canNavigateTo("SIMULATION_3D"))
+        navigateTo("SIMULATION_3D");
+      return;
+    }
+
+    if (cmd.includes("back") || cmd.includes("previous")) {
+      if (stage === "SYSTEM_CONFIG") navigateTo("WELCOME");
+      else if (stage === "PROCESS_NAMING") navigateTo("SYSTEM_CONFIG");
+      else if (stage === "RESOURCE_NAMING") navigateTo("PROCESS_NAMING");
+      else if (stage === "ALLOCATION_INPUT") navigateTo("RESOURCE_NAMING");
+      else if (stage === "SAFETY_ANALYSIS") navigateTo("ALLOCATION_INPUT");
+      else if (stage === "SIMULATION_3D") navigateTo("SAFETY_ANALYSIS");
+      return;
+    }
+
+    if (cmd.includes("analyze") || cmd.includes("safety")) {
+      if (canNavigateTo("SAFETY_ANALYSIS")) {
+        navigateTo("SAFETY_ANALYSIS");
+      }
+      return;
+    }
+
+    if (cmd.includes("3d") || cmd.includes("universe") || cmd.includes("simulation")) {
+      if (canNavigateTo("SIMULATION_3D")) {
+        navigateTo("SIMULATION_3D");
+      }
+      return;
+    }
+
+    if (cmd.includes("reset") || cmd.includes("restart")) {
+      setShowResetModal(true);
+      return;
+    }
+
+    // Default friendly fallback
+    setDialogue(`I heard "${rawCommand}". Try saying "Next", "Back", "Analyze", or "3D Universe".`);
+  };
+
+  // Dimensions confirmed in Stage 2
+  const handleDimensionsConfirm = (pCount: number, rCount: number) => {
+    setModel((prev) => {
+      // Re-dimension process names if count changed
+      let pNames = [...prev.processNames];
+      if (pNames.length < pCount) {
+        const extra = createDefaultProcessNames(pCount);
+        pNames = [...pNames, ...extra.slice(pNames.length)];
+      } else {
+        pNames = pNames.slice(0, pCount);
+      }
+
+      // Re-dimension resource names if count changed
+      let rNames = [...prev.resourceNames];
+      if (rNames.length < rCount) {
+        const extra = createDefaultResourceNames(rCount);
+        rNames = [...rNames, ...extra.slice(rNames.length)];
+      } else {
+        rNames = rNames.slice(0, rCount);
+      }
+
+      // Resize allocation matrix
+      const newAlloc = createEmptyMatrix(pCount, rCount, 0);
+      for (let i = 0; i < Math.min(prev.allocation.length, pCount); i++) {
+        for (let j = 0; j < Math.min(prev.allocation[i]?.length || 0, rCount); j++) {
+          newAlloc[i][j] = prev.allocation[i][j];
+        }
+      }
+
+      // Resize max matrix
+      const newMax = createEmptyMatrix(pCount, rCount, 0);
+      for (let i = 0; i < Math.min(prev.max.length, pCount); i++) {
+        for (let j = 0; j < Math.min(prev.max[i]?.length || 0, rCount); j++) {
+          newMax[i][j] = prev.max[i][j];
+        }
+      }
+
+      // Resize available vector
+      const newAvail = createEmptyVector(rCount, 2);
+      for (let j = 0; j < Math.min(prev.available.length, rCount); j++) {
+        newAvail[j] = prev.available[j];
+      }
+
+      return {
+        processCount: pCount,
+        resourceCount: rCount,
+        processNames: pNames,
+        resourceNames: rNames,
+        allocation: newAlloc,
+        max: newMax,
+        available: newAvail,
+      };
     });
-    setRequestMessage(null);
-    setStepIndex(0);
-  }
 
-  function updateAvailable(index: number, value: number) {
-    setInput((previous) => {
-      const next = cloneInput(previous);
-      next.available[index] = value;
-      return next;
-    });
-    setRequestMessage(null);
-    setStepIndex(0);
-  }
+    navigateTo("PROCESS_NAMING");
+  };
 
-  function resetSimulation() {
-    setInput(cloneInput(INITIAL_INPUT));
-    setStepIndex(0);
-    setProcessChoice(1);
-    setRequest([1, 0, 2]);
-    setRequestMessage(null);
-  }
+  // Process names confirmed in Stage 3
+  const handleProcessNamesConfirm = (names: string[]) => {
+    setModel((prev) => ({ ...prev, processNames: names }));
+    navigateTo("RESOURCE_NAMING");
+  };
 
-  function runNextStep() {
-    if (!result || stepIndex >= result.steps.length) return;
-    setStepIndex((previous) => previous + 1);
-  }
+  // Resource names confirmed in Stage 4
+  const handleResourceNamesConfirm = (names: string[]) => {
+    setModel((prev) => ({ ...prev, resourceNames: names }));
+    navigateTo("ALLOCATION_INPUT");
+  };
 
-  function submitRequest() {
-    setRequestMessage(null);
-
-    if (!result) {
-      setRequestMessage({
-        type: "error",
-        title: "Invalid system state",
-        detail: "Correct the matrix values before submitting a request.",
-      });
-      return;
-    }
-
-    const processNeed = need[processChoice];
-
-    if (!request.every((value) => Number.isSafeInteger(value) && value >= 0)) {
-      setRequestMessage({
-        type: "error",
-        title: "Invalid request",
-        detail: "Every requested quantity must be a non-negative integer.",
-      });
-      return;
-    }
-
-    if (request.some((value, j) => value > processNeed[j])) {
-      setRequestMessage({
-        type: "error",
-        title: "Request exceeds Need",
-        detail: `P${processChoice} cannot request more than its remaining declared maximum claim.`,
-      });
-      return;
-    }
-
-    if (request.some((value, j) => value > input.available[j])) {
-      setRequestMessage({
-        type: "error",
-        title: "Insufficient Available resources",
-        detail: "The system does not currently have enough free instances to grant this request.",
-      });
-      return;
-    }
-
-    const tentative = cloneInput(input);
-
-    for (let j = 0; j < request.length; j++) {
-      tentative.available[j] -= request[j];
-      tentative.allocation[processChoice][j] += request[j];
-    }
-
-    const tentativeResult = runSafetyAlgorithm(tentative);
-
-    if (!tentativeResult.isSafe) {
-      setRequestMessage({
-        type: "error",
-        title: "Request denied · Unsafe state",
-        detail: `Granting this request would leave P${tentativeResult.unfinishedProcesses
-          .map((process) => `P${process}`)
-          .join(", ")} unable to complete in the safety check. The original state has been preserved.`,
-      });
-      return;
-    }
-
-    setInput(tentative);
-    setStepIndex(0);
-    setRequestMessage({
-      type: "success",
-      title: "Request granted · State remains safe",
-      detail: `Safe sequence after allocation: ${tentativeResult.safeSequence
-        .map((process) => `P${process}`)
-        .join(" → ")}.`,
-    });
-  }
+  // Reset to initial classic state
+  const handleGlobalReset = () => {
+    setModel(structuredClone(CLASSIC_5X3_PRESET));
+    setShowResetModal(false);
+    navigateTo("WELCOME", "Simulation reset to initial state. Say Start or click to begin.");
+  };
 
   return (
     <main className="app-shell">
+      {/* GLOBAL TOPBAR */}
       <header className="topbar">
-        <div className="brand">
-          <div className="brand-mark"><Cpu size={23} /></div>
+        <div
+          className="brand"
+          onClick={() => navigateTo("WELCOME")}
+          role="button"
+          tabIndex={0}
+          title="Return to Welcome"
+        >
+          <div className="brand-mark">
+            <Cpu size={23} />
+          </div>
           <div>
-            <div className="brand-name">KERNEL <span>3D</span></div>
-            <div className="brand-subtitle">RESOURCE ALLOCATION INTELLIGENCE</div>
+            <div className="brand-name">
+              KERNEL <span>3D</span>
+            </div>
+            <div className="brand-subtitle">
+              BANKER'S ALGORITHM LABORATORY
+            </div>
           </div>
         </div>
 
         <div className="system-status">
           <span className="status-dot" />
-          SYSTEM ONLINE
+          <span>OS SIMULATOR ONLINE</span>
           <span className="status-divider">/</span>
-          BANKER'S ALGORITHM
+          <span className="status-stage-label">STAGE: {stage}</span>
         </div>
 
-        <button className="secondary-button" onClick={resetSimulation}>
-          <RotateCcw size={15} /> Reset
-        </button>
+        <div className="topbar-actions">
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => setShowResetModal(true)}
+            title="Reset entire simulation"
+          >
+            <RotateCcw size={14} /> Reset Simulation
+          </button>
+        </div>
       </header>
 
-      <section className="hero">
-        <div>
-          <div className="eyebrow"><Activity size={14} /> OPERATING SYSTEMS LAB / 01</div>
-          <h1>Resource <span>Universe</span></h1>
-          <p className="hero-description">
-            Explore resource allocation, simulate process requests, and inspect
-            system safety in real time.
-          </p>
-        </div>
-        <div className={`verdict-chip ${result?.isSafe ? "safe" : "unsafe"}`}>
-          {result?.isSafe ? <ShieldCheck size={17} /> : <ShieldAlert size={17} />}
-          {result?.isSafe ? "SAFE STATE" : "UNSAFE STATE"}
-        </div>
-      </section>
+      {/* WORKFLOW STEPPER NAVIGATION */}
+      <StageNavigation
+        currentStage={stage}
+        onSelectStage={(s) => navigateTo(s)}
+        canNavigateTo={canNavigateTo}
+      />
 
-      <section className="stats-grid">
-        <div className="stat-card">
-          <span className="stat-label">PROCESSES</span>
-          <strong>{input.allocation.length.toString().padStart(2, "0")}</strong>
-          <span className="stat-foot">Active process units</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-label">RESOURCE TYPES</span>
-          <strong>{input.available.length.toString().padStart(2, "0")}</strong>
-          <span className="stat-foot">Independent resource classes</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-label">SAFE SEQUENCE</span>
-          <strong>{result?.safeSequence.length ?? 0}<small>/{input.allocation.length}</small></strong>
-          <span className="stat-foot">Processes currently schedulable</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-label">EXECUTION STEP</span>
-          <strong>{stepIndex.toString().padStart(2, "0")}<small>/{result?.steps.length ?? 0}</small></strong>
-          <span className="stat-foot">Safety trace progress</span>
-        </div>
-      </section>
-
-      <section className="main-grid">
-        <article className="panel matrix-panel">
-          <div className="panel-heading">
-            <div>
-              <div className="eyebrow">01 / SYSTEM STATE</div>
-              <h2>Resource Matrix</h2>
+      {/* CONFIRM RESET MODAL */}
+      {showResetModal && (
+        <div className="modal-overlay" role="dialog" aria-modal="true">
+          <div className="modal-dialog">
+            <div className="modal-title">
+              <AlertTriangle size={20} className="modal-warning-icon" />
+              Reset Simulation to Initial State?
             </div>
-            <span className="panel-tag">EDITABLE</span>
-          </div>
-
-          <p className="panel-description">
-            Adjust Allocation, Max, and Available. Need is calculated automatically.
-          </p>
-
-          <div className="matrix-block">
-            <div className="matrix-title">
-              <span>ALLOCATION</span>
-              <span className="matrix-symbol">Currently held</span>
-            </div>
-            <div className="matrix-table">
-              <div className="matrix-row matrix-header">
-                <span>PROC</span>
-                {RESOURCE_NAMES.map((name, j) => <span key={name} style={{ color: RESOURCE_COLORS[j] }}>{name.slice(-1)}</span>)}
-              </div>
-              {input.allocation.map((row, i) => (
-                <div className="matrix-row" key={`allocation-${i}`}>
-                  <strong>P{i}</strong>
-                  {row.map((value, j) => (
-                    <NumberCell
-                      key={j}
-                      value={value}
-                      label={`Allocation P${i} resource ${j}`}
-                      onChange={(next) => updateMatrix("allocation", i, j, next)}
-                    />
-                  ))}
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="matrix-block">
-            <div className="matrix-title">
-              <span>MAX CLAIM</span>
-              <span className="matrix-symbol">Declared maximum</span>
-            </div>
-            <div className="matrix-table">
-              <div className="matrix-row matrix-header">
-                <span>PROC</span>
-                {RESOURCE_NAMES.map((name, j) => <span key={name} style={{ color: RESOURCE_COLORS[j] }}>{name.slice(-1)}</span>)}
-              </div>
-              {input.max.map((row, i) => (
-                <div className="matrix-row" key={`max-${i}`}>
-                  <strong>P{i}</strong>
-                  {row.map((value, j) => (
-                    <NumberCell
-                      key={j}
-                      value={value}
-                      label={`Max P${i} resource ${j}`}
-                      onChange={(next) => updateMatrix("max", i, j, next)}
-                    />
-                  ))}
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="matrix-block">
-            <div className="matrix-title">
-              <span>NEED</span>
-              <span className="matrix-symbol">Max − Allocation</span>
-            </div>
-            <div className="matrix-table">
-              <div className="matrix-row matrix-header">
-                <span>PROC</span>
-                {RESOURCE_NAMES.map((name, j) => <span key={name} style={{ color: RESOURCE_COLORS[j] }}>{name.slice(-1)}</span>)}
-              </div>
-              {need.map((row, i) => (
-                <div className="matrix-row" key={`need-${i}`}>
-                  <strong>P{i}</strong>
-                  {row.map((value, j) => (
-                    <span className="matrix-value" key={j}>{value}</span>
-                  ))}
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="available-block">
-            <div>
-              <div className="matrix-title">AVAILABLE RESOURCES</div>
-              <div className="available-caption">Unallocated instances</div>
-            </div>
-            <div className="available-inputs">
-              {input.available.map((value, j) => (
-                <label className="available-field" key={j}>
-                  <span style={{ color: RESOURCE_COLORS[j] }}>{RESOURCE_NAMES[j].slice(-1)}</span>
-                  <NumberCell
-                    value={value}
-                    label={`Available resource ${j}`}
-                    onChange={(next) => updateAvailable(j, next)}
-                  />
-                </label>
-              ))}
-            </div>
-          </div>
-        </article>
-
-        <article className="panel universe-panel">
-          <div className="panel-heading">
-            <div>
-              <div className="eyebrow">02 / LIVE VISUALIZATION</div>
-              <h2>Resource Universe</h2>
-            </div>
-            <span className="live-tag"><span className="status-dot" /> LIVE</span>
-          </div>
-          <p className="panel-description">
-            Rotate the scene to inspect process nodes and their resource links.
-          </p>
-
-          <div className="scene-container">
-            <ResourceScene
-              allocation={input.allocation}
-              activeProcess={activeProcess}
-              completedProcesses={completedProcesses}
-            />
-            <div className="scene-label scene-label-left">RESOURCE NODES</div>
-            <div className="scene-label scene-label-right">PROCESS NODES</div>
-          </div>
-
-          <div className="scene-legend">
-            {RESOURCE_NAMES.map((name, j) => (
-              <span key={name}><i style={{ background: RESOURCE_COLORS[j] }} />{name}</span>
-            ))}
-          </div>
-          <div className="process-node-list">
-            {input.allocation.map((_, i) => (
-              <div
-                className={`process-pill ${activeProcess === i ? "active" : ""} ${completedProcesses.includes(i) ? "completed" : ""}`}
-                key={i}
+            <p className="modal-desc">
+              All custom process names, resource names, and matrix values will
+              be restored to defaults. Are you sure you want to proceed?
+            </p>
+            <div className="modal-buttons">
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => setShowResetModal(false)}
               >
-                <span />P{i}
-                {completedProcesses.includes(i) && <CheckCircle2 size={12} />}
-              </div>
-            ))}
-          </div>
-        </article>
-      </section>
-
-      <section className="lower-grid">
-        <article className="panel safety-panel">
-          <div className="panel-heading">
-            <div>
-              <div className="eyebrow">03 / DEADLOCK AVOIDANCE</div>
-              <h2>Safety Analysis</h2>
-            </div>
-            <Terminal size={19} className="heading-icon" />
-          </div>
-
-          <div className={`analysis-banner ${result?.isSafe ? "safe" : "unsafe"}`}>
-            {result?.isSafe ? <CheckCircle2 size={21} /> : <XCircle size={21} />}
-            <div>
-              <strong>{result?.isSafe ? "System is in a safe state" : "System is in an unsafe state"}</strong>
-              <span>
-                {result?.isSafe
-                  ? "At least one complete execution order exists."
-                  : "No complete safe sequence was found for the current state."}
-              </span>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="primary-button danger-btn"
+                onClick={handleGlobalReset}
+              >
+                Confirm Reset
+              </button>
             </div>
           </div>
+        </div>
+      )}
 
-          <div className="sequence-label">SAFE SEQUENCE</div>
-          <div className="sequence-flow">
-            {result?.safeSequence.length ? result.safeSequence.map((process, i) => (
-              <div className="sequence-item" key={process}>
-                <span className={`sequence-node ${completedProcesses.includes(process) ? "done" : ""}`}>P{process}</span>
-                {i < result.safeSequence.length - 1 && <ArrowRight size={15} />}
-              </div>
-            )) : <span className="empty-state">No safe sequence available.</span>}
-          </div>
-
-          <div className="trace-divider" />
-          <div className="trace-heading">
-            <div>
-              <div className="sequence-label">EXECUTION TRACE</div>
-              <p>Advance one process at a time.</p>
-            </div>
-            <button className="primary-button" onClick={runNextStep} disabled={!result || stepIndex >= result.steps.length}>
-              <Play size={14} /> Next step
-            </button>
-          </div>
-
-          {currentStep ? (
-            <div className="trace-card">
-              <div className="trace-card-top">
-                <span className="trace-process">P{currentStep.process}</span>
-                <span className="trace-complete"><CheckCircle2 size={14} /> COMPLETED</span>
-              </div>
-              <div className="trace-equation">
-                <div><span>WORK BEFORE</span><strong>[{currentStep.workBefore.join(", ")}]</strong></div>
-                <ArrowRight size={16} />
-                <div><span>WORK AFTER</span><strong>[{currentStep.workAfter.join(", ")}]</strong></div>
-              </div>
-              <div className="trace-need">Need: [{currentStep.need.join(", ")}] ≤ Work before execution</div>
-            </div>
-          ) : (
-            <div className="trace-empty">
-              <Activity size={19} />
-              <span>Run the next step to inspect Work and Need comparisons.</span>
-            </div>
-          )}
-
-          {result && stepIndex >= result.steps.length && result.isSafe && (
-            <div className="completion-note">All processes in the safe sequence have completed.</div>
-          )}
-        </article>
-
-        <article className="panel request-panel">
-          <div className="panel-heading">
-            <div>
-              <div className="eyebrow">04 / WHAT-IF SIMULATION</div>
-              <h2>Future Request Lab</h2>
-            </div>
-            <FlaskConical size={20} className="heading-icon" />
-          </div>
-          <p className="panel-description">
-            Simulate a process requesting more resources. The state changes only if the request passes the safety check.
-          </p>
-
-          <label className="form-label" htmlFor="process-choice">REQUESTING PROCESS</label>
-          <select
-            id="process-choice"
-            className="request-select"
-            value={processChoice}
-            onChange={(event) => {
-              setProcessChoice(Number(event.target.value));
-              setRequestMessage(null);
+      {/* ACTIVE STAGE WORKSPACE */}
+      <div className="stage-content-container">
+        {stage === "WELCOME" && (
+          <WelcomeStage
+            dialogue={dialogue}
+            onStartCustom={() => navigateTo("SYSTEM_CONFIG")}
+            onLoadClassic={() => {
+              setModel(structuredClone(CLASSIC_5X3_PRESET));
+              navigateTo(
+                "SAFETY_ANALYSIS",
+                "Classic 5-process, 3-resource example loaded. Let's inspect the safety sequence.",
+              );
             }}
-          >
-            {input.allocation.map((_, i) => (
-              <option value={i} key={i}>Process P{i}</option>
-            ))}
-          </select>
+            onLoadUnsafe={() => {
+              setModel(structuredClone(UNSAFE_PRESET));
+              navigateTo(
+                "SAFETY_ANALYSIS",
+                "Unsafe state loaded. Notice how the safety algorithm detects deadlock risk.",
+              );
+            }}
+            onVoiceCommand={handleVoiceCommand}
+          />
+        )}
 
-          <div className="request-vector-heading">
-            <span className="form-label">REQUEST VECTOR</span>
-            <span className="matrix-symbol">[A, B, C]</span>
-          </div>
-          <div className="request-vector">
-            {request.map((value, j) => (
-              <label className="request-resource" key={j}>
-                <span style={{ color: RESOURCE_COLORS[j] }}>{RESOURCE_NAMES[j]}</span>
-                <NumberCell
-                  value={value}
-                  label={`Request for resource ${j}`}
-                  onChange={(next) => {
-                    setRequest((previous) => previous.map((v, i) => i === j ? next : v));
-                    setRequestMessage(null);
-                  }}
-                />
-                <small>Need: {need[processChoice]?.[j] ?? 0} · Free: {input.available[j]}</small>
-              </label>
-            ))}
-          </div>
+        {stage === "SYSTEM_CONFIG" && (
+          <SystemConfigStage
+            initialProcessCount={model.processCount}
+            initialResourceCount={model.resourceCount}
+            onConfirm={handleDimensionsConfirm}
+            onBack={() => navigateTo("WELCOME")}
+          />
+        )}
 
-          <button className="primary-button request-submit" onClick={submitRequest}>
-            <FlaskConical size={16} /> Evaluate & simulate request
-          </button>
+        {stage === "PROCESS_NAMING" && (
+          <ProcessNamingStage
+            processCount={model.processCount}
+            initialNames={model.processNames}
+            onConfirm={handleProcessNamesConfirm}
+            onBack={() => navigateTo("SYSTEM_CONFIG")}
+          />
+        )}
 
-          {requestMessage ? (
-            <div className={`request-result ${requestMessage.type}`}>
-              <div className="request-result-title">
-                {requestMessage.type === "success"
-                  ? <CheckCircle2 size={18} />
-                  : requestMessage.type === "error"
-                    ? <ShieldAlert size={18} />
-                    : <Activity size={18} />}
-                <strong>{requestMessage.title}</strong>
+        {stage === "RESOURCE_NAMING" && (
+          <ResourceNamingStage
+            resourceCount={model.resourceCount}
+            initialNames={model.resourceNames}
+            onConfirm={handleResourceNamesConfirm}
+            onBack={() => navigateTo("PROCESS_NAMING")}
+          />
+        )}
+
+        {stage === "ALLOCATION_INPUT" && (
+          <MatrixEditorStage
+            model={model}
+            onUpdateModel={setModel}
+            onAnalyze={() => {
+              const res = safetyResult;
+              const msg = res?.isSafe
+                ? "The system is in a safe state! A valid safe execution sequence was verified."
+                : "The system is in an unsafe state. No execution order guarantees avoidance of deadlock.";
+              navigateTo("SAFETY_ANALYSIS", msg);
+            }}
+            onBack={() => navigateTo("RESOURCE_NAMING")}
+            onReset={() => {
+              setModel((prev) => ({
+                ...prev,
+                allocation: createEmptyMatrix(prev.processCount, prev.resourceCount, 0),
+                max: createEmptyMatrix(prev.processCount, prev.resourceCount, 0),
+                available: createEmptyVector(prev.resourceCount, 1),
+              }));
+            }}
+            resourceColors={RESOURCE_COLOR_PALETTE}
+          />
+        )}
+
+        {stage === "SAFETY_ANALYSIS" && (
+          <SafetyAnalysisStage
+            model={model}
+            onLaunch3D={() => navigateTo("SIMULATION_3D")}
+            onBackToMatrices={() => navigateTo("ALLOCATION_INPUT")}
+            onApplyRequest={(newModel) => {
+              setModel(newModel);
+              setDialogue(
+                "Resource request granted! Allocation and Available have been updated and safety verified.",
+              );
+            }}
+            resourceColors={RESOURCE_COLOR_PALETTE}
+          />
+        )}
+
+        {stage === "SIMULATION_3D" && (
+          <Suspense
+            fallback={
+              <div className="scene-loading-placeholder">
+                <Activity size={32} className="spin-slow" />
+                <span>Initializing 3D Resource Universe...</span>
               </div>
-              <p>{requestMessage.detail}</p>
-            </div>
-          ) : (
-            <div className="request-hint">
-              <ShieldCheck size={17} />
-              <span>Request checks: Need limit → Available limit → tentative allocation → safety test.</span>
-            </div>
-          )}
+            }
+          >
+            {safetyResult && (
+              <Simulation3DStage
+                model={model}
+                safetyResult={safetyResult}
+                onBackToAnalysis={() => navigateTo("SAFETY_ANALYSIS")}
+                onBackToMatrices={() => navigateTo("ALLOCATION_INPUT")}
+                resourceColors={RESOURCE_COLOR_PALETTE}
+              />
+            )}
+          </Suspense>
+        )}
+      </div>
 
-          <div className="request-rules">
-            <div><span>01</span>Request ≤ Need</div>
-            <div><span>02</span>Request ≤ Available</div>
-            <div><span>03</span>Resulting state must be safe</div>
-          </div>
-        </article>
-      </section>
+      {/* FLOATING LISA ASSISTANT (Stages 2 through 7) */}
+      {stage !== "WELCOME" && (
+        <LisaAssistant
+          dialogue={dialogue}
+          isWelcomeStage={false}
+          onVoiceCommand={handleVoiceCommand}
+          onAdvanceStage={() => {
+            if (stage === "SYSTEM_CONFIG") navigateTo("PROCESS_NAMING");
+            else if (stage === "PROCESS_NAMING") navigateTo("RESOURCE_NAMING");
+            else if (stage === "RESOURCE_NAMING") navigateTo("ALLOCATION_INPUT");
+            else if (stage === "ALLOCATION_INPUT" && canNavigateTo("SAFETY_ANALYSIS"))
+              navigateTo("SAFETY_ANALYSIS");
+            else if (stage === "SAFETY_ANALYSIS" && canNavigateTo("SIMULATION_3D"))
+              navigateTo("SIMULATION_3D");
+          }}
+          hintActionText={
+            stage === "ALLOCATION_INPUT"
+              ? "Analyze"
+              : stage === "SAFETY_ANALYSIS"
+                ? "3D View"
+                : "Next"
+          }
+        />
+      )}
 
+      {/* FOOTER */}
       <footer className="app-footer">
-        <span>KERNEL 3D <span className="footer-dot">/</span> BANKER'S ALGORITHM SIMULATOR</span>
-        <span>BUILT FOR OS LEARNING <span className="footer-dot">·</span> INTERACTIVE MODE</span>
+        <div className="footer-left">
+          <span>KERNEL 3D</span>
+          <span className="footer-dot">/</span>
+          <span>BANKER'S ALGORITHM SCIENTIFIC SIMULATOR</span>
+        </div>
+        <div className="footer-right">
+          <span>GUIDED BY LISA AI</span>
+          <span className="footer-dot">·</span>
+          <span>DIJKSTRA DEADLOCK AVOIDANCE ENGINE</span>
+        </div>
       </footer>
     </main>
   );
 }
-
-export default App;
