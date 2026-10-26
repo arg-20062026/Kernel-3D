@@ -106,6 +106,13 @@ export default function SafetyAnalysisStage({
       </div>
 
       {/* VERDICT HERO BANNER */}
+      <div className="voice-prompt-banner">
+        <Activity size={20} className="pulse-cyan" />
+        <div>
+          <strong>Voice Active:</strong> Say &ldquo;Next&rdquo; to launch 3D execution trace animation, or say &ldquo;Back&rdquo; to modify matrices.
+        </div>
+      </div>
+
       <div className={`verdict-banner ${isSafe ? "safe" : "unsafe"}`}>
         <div className="verdict-banner-icon">
           {isSafe ? <ShieldCheck size={36} /> : <ShieldAlert size={36} />}

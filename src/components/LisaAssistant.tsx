@@ -1,7 +1,6 @@
-import { useState, useEffect, useRef } from "react";
+import { useState } from "react";
 import {
   Mic,
-  MicOff,
   Volume2,
   VolumeX,
   RotateCcw,
@@ -10,14 +9,41 @@ import {
   ChevronUp,
   Radio,
   Send,
+  CheckCircle2,
+  AlertCircle,
+  HelpCircle,
 } from "lucide-react";
-import { speechManager } from "../utils/speech";
 import lisaAvatarUrl from "../assets/lisa-avatar.jpg";
+import type { VoiceWorkflowState } from "../types/simulation";
+
+export type AssistantVisualState =
+  | "welcome"
+  | "speaking"
+  | "listening"
+  | "processing"
+  | "waiting"
+  | "success"
+  | "warning"
+  | "error"
+  | "minimized"
+  | "session-ended";
 
 interface LisaAssistantProps {
   dialogue: string;
   isWelcomeStage?: boolean;
-  onVoiceCommand?: (command: string) => void;
+  visualState: AssistantVisualState;
+  workflowState: VoiceWorkflowState;
+  isMuted: boolean;
+  isListening: boolean;
+  isSpeaking: boolean;
+  lastTranscript?: string;
+  lastCommandStatus?: {
+    type: "accepted" | "rejected" | "clarify";
+    message: string;
+  } | null;
+  onToggleMute: () => void;
+  onReplayDialogue: () => void;
+  onVoiceCommandSubmit: (cmd: string) => void;
   onAdvanceStage?: () => void;
   hintActionText?: string;
 }
@@ -25,116 +51,48 @@ interface LisaAssistantProps {
 export default function LisaAssistant({
   dialogue,
   isWelcomeStage = false,
-  onVoiceCommand,
+  visualState,
+  isMuted,
+  isListening,
+  isSpeaking,
+  lastTranscript,
+  lastCommandStatus,
+  onToggleMute,
+  onReplayDialogue,
+  onVoiceCommandSubmit,
   onAdvanceStage,
   hintActionText,
 }: LisaAssistantProps) {
-  const [isSpeaking, setIsSpeaking] = useState(false);
-  const [isListening, setIsListening] = useState(false);
-  const [isMuted, setIsMuted] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
   const [typedInput, setTypedInput] = useState("");
-  const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
-
-  const prevDialogueRef = useRef<string>("");
-
-  // Speak when dialogue changes if not muted
-  useEffect(() => {
-    if (dialogue && dialogue !== prevDialogueRef.current) {
-      prevDialogueRef.current = dialogue;
-      if (!isMuted) {
-        speechManager.speak(dialogue, {
-          onStart: () => setIsSpeaking(true),
-          onEnd: () => setIsSpeaking(false),
-          onError: () => setIsSpeaking(false),
-        });
-      }
-    }
-  }, [dialogue, isMuted]);
-
-  // Clean up speech on unmount
-  useEffect(() => {
-    return () => {
-      speechManager.stopSpeaking();
-      speechManager.stopListening();
-    };
-  }, []);
-
-  const toggleMute = () => {
-    const next = !isMuted;
-    setIsMuted(next);
-    speechManager.setMuted(next);
-    if (next) {
-      setIsSpeaking(false);
-    } else {
-      // Re-speak current dialogue
-      speechManager.speak(dialogue, {
-        onStart: () => setIsSpeaking(true),
-        onEnd: () => setIsSpeaking(false),
-        onError: () => setIsSpeaking(false),
-      });
-    }
-  };
-
-  const replayDialogue = () => {
-    setIsSpeaking(true);
-    speechManager.speak(dialogue, {
-      onStart: () => setIsSpeaking(true),
-      onEnd: () => setIsSpeaking(false),
-      onError: () => setIsSpeaking(false),
-    });
-  };
-
-  const toggleListening = () => {
-    if (isListening) {
-      speechManager.stopListening();
-      setIsListening(false);
-      return;
-    }
-
-    if (!speechManager.isSTTSupported()) {
-      setFeedbackMessage("Speech recognition is not supported in this browser. You can type or click below.");
-      setTimeout(() => setFeedbackMessage(null), 4000);
-      return;
-    }
-
-    setIsListening(true);
-    setFeedbackMessage("Listening... Speak now");
-
-    speechManager.startListening({
-      onStart: () => {
-        setIsListening(true);
-      },
-      onResult: (transcript) => {
-        setIsListening(false);
-        setFeedbackMessage(`Heard: "${transcript}"`);
-        setTimeout(() => setFeedbackMessage(null), 3000);
-        onVoiceCommand?.(transcript);
-      },
-      onError: (err) => {
-        setIsListening(false);
-        setFeedbackMessage(err);
-        setTimeout(() => setFeedbackMessage(null), 4000);
-      },
-      onEnd: () => {
-        setIsListening(false);
-      },
-    });
-  };
 
   const handleCommandSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!typedInput.trim()) return;
-    const cmd = typedInput.trim().toLowerCase();
+    const cmd = typedInput.trim();
     setTypedInput("");
-    onVoiceCommand?.(cmd);
+    onVoiceCommandSubmit(cmd);
   };
+
+  const statusLabel = isSpeaking
+    ? "LISA IS SPEAKING"
+    : isListening
+      ? "LISTENING FOR COMMAND"
+      : visualState === "processing"
+        ? "PROCESSING INPUT"
+        : visualState === "session-ended"
+          ? "SESSION ENDED"
+          : "VOICE ONLINE";
 
   if (isWelcomeStage) {
     return (
-      <div className="lisa-welcome-hero">
+      <div className="lisa-welcome-hero" role="region" aria-label="Lisa AI Guide">
         <div className="lisa-avatar-wrapper large">
-          <div className={`lisa-avatar-ring ${isSpeaking ? "speaking" : ""} ${isListening ? "listening" : ""}`}>
+          <div
+            className={`lisa-avatar-ring ${isSpeaking ? "speaking" : ""} ${
+              isListening ? "listening" : ""
+            }`}
+          >
             <img
               src={lisaAvatarUrl}
               alt="Lisa - Virtual AI Guide"
@@ -143,34 +101,44 @@ export default function LisaAssistant({
           </div>
           <div className="lisa-status-badge">
             <Radio size={12} className={isSpeaking || isListening ? "pulse" : ""} />
-            <span>{isSpeaking ? "SPEAKING" : isListening ? "LISTENING" : "ONLINE"}</span>
+            <span>{statusLabel}</span>
           </div>
         </div>
 
         <div className="lisa-welcome-content">
           <div className="lisa-guide-tag">
             <Sparkles size={14} />
-            <span>AI SIMULATION GUIDE</span>
+            <span>VIRTUAL AI PROFESSOR</span>
           </div>
           <h2 className="lisa-name-title">Lisa</h2>
           <p className="lisa-speech-balloon">{dialogue}</p>
 
+          <div className="lisa-live-transcript-bar">
+            <Mic size={14} className={isListening ? "mic-glow" : ""} />
+            <span className="transcript-label">Live Speech:</span>
+            <span className="transcript-text">
+              {lastTranscript ? `"${lastTranscript}"` : isListening ? "Listening... Speak now" : "Mic paused"}
+            </span>
+          </div>
+
+          {lastCommandStatus && (
+            <div className={`command-status-pill ${lastCommandStatus.type}`} role="status">
+              {lastCommandStatus.type === "accepted" ? (
+                <CheckCircle2 size={14} />
+              ) : lastCommandStatus.type === "rejected" ? (
+                <AlertCircle size={14} />
+              ) : (
+                <HelpCircle size={14} />
+              )}
+              <span>{lastCommandStatus.message}</span>
+            </div>
+          )}
+
           <div className="lisa-controls-row">
             <button
               type="button"
-              className={`mic-button ${isListening ? "active" : ""}`}
-              onClick={toggleListening}
-              title={isListening ? "Stop listening" : "Click to speak voice command"}
-              aria-label="Toggle voice input"
-            >
-              {isListening ? <MicOff size={18} /> : <Mic size={18} />}
-              <span>{isListening ? "Listening..." : "Say 'Start'"}</span>
-            </button>
-
-            <button
-              type="button"
               className="icon-tool-button"
-              onClick={replayDialogue}
+              onClick={onReplayDialogue}
               title="Replay Lisa's voice"
               aria-label="Replay speech"
             >
@@ -180,29 +148,33 @@ export default function LisaAssistant({
             <button
               type="button"
               className={`icon-tool-button ${isMuted ? "muted" : ""}`}
-              onClick={toggleMute}
+              onClick={onToggleMute}
               title={isMuted ? "Unmute Lisa" : "Mute voice"}
               aria-label={isMuted ? "Unmute" : "Mute"}
             >
               {isMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}
             </button>
-          </div>
 
-          {feedbackMessage && (
-            <div className="lisa-feedback-notice" role="status">
-              {feedbackMessage}
-            </div>
-          )}
+            {hintActionText && onAdvanceStage && (
+              <button
+                type="button"
+                className="primary-button quick-action-btn"
+                onClick={onAdvanceStage}
+              >
+                {hintActionText}
+              </button>
+            )}
+          </div>
         </div>
       </div>
     );
   }
 
-  // Floating dock assistant for Stage 2 to 7
+  // Floating dock assistant for Step 6 onwards (or minimized state)
   return (
     <aside
       className={`lisa-floating-panel ${isMinimized ? "minimized" : ""}`}
-      aria-label="Lisa AI Guide"
+      aria-label="Lisa AI Floating Guide"
     >
       {isMinimized ? (
         <button
@@ -213,7 +185,9 @@ export default function LisaAssistant({
         >
           <div className="avatar-pill-ring">
             <img src={lisaAvatarUrl} alt="Lisa" className="avatar-pill-img" />
-            <span className={`pill-dot ${isSpeaking ? "speaking" : ""}`} />
+            <span
+              className={`pill-dot ${isSpeaking ? "speaking" : isListening ? "listening" : ""}`}
+            />
           </div>
           <span className="pill-name">Lisa</span>
           <ChevronUp size={14} />
@@ -228,13 +202,15 @@ export default function LisaAssistant({
                   alt="Lisa"
                   className={`mini-avatar-img ${isSpeaking ? "pulse-border" : ""}`}
                 />
-                <span className={`status-indicator ${isSpeaking ? "speaking" : isListening ? "listening" : "idle"}`} />
+                <span
+                  className={`status-indicator ${
+                    isSpeaking ? "speaking" : isListening ? "listening" : "idle"
+                  }`}
+                />
               </div>
               <div>
                 <strong className="lisa-title-text">Lisa</strong>
-                <span className="lisa-sub-text">
-                  {isSpeaking ? "Speaking..." : isListening ? "Listening..." : "OS Assistant"}
-                </span>
+                <span className="lisa-sub-text">{statusLabel}</span>
               </div>
             </div>
 
@@ -242,7 +218,7 @@ export default function LisaAssistant({
               <button
                 type="button"
                 className="icon-mini-button"
-                onClick={replayDialogue}
+                onClick={onReplayDialogue}
                 title="Replay dialogue"
                 aria-label="Replay dialogue"
               >
@@ -252,7 +228,7 @@ export default function LisaAssistant({
               <button
                 type="button"
                 className={`icon-mini-button ${isMuted ? "muted" : ""}`}
-                onClick={toggleMute}
+                onClick={onToggleMute}
                 title={isMuted ? "Unmute" : "Mute"}
                 aria-label={isMuted ? "Unmute" : "Mute"}
               >
@@ -273,13 +249,26 @@ export default function LisaAssistant({
 
           <div className="lisa-card-body">
             <p className="lisa-dialogue-text">{dialogue}</p>
+
+            <div className="lisa-mini-transcript">
+              <Mic size={12} className={isListening ? "mic-glow" : ""} />
+              <span className="mini-transcript-val">
+                {lastTranscript ? `"${lastTranscript}"` : isListening ? "Listening..." : "Paused"}
+              </span>
+            </div>
+
+            {lastCommandStatus && (
+              <div className={`mini-command-status ${lastCommandStatus.type}`}>
+                {lastCommandStatus.message}
+              </div>
+            )}
           </div>
 
           <div className="lisa-card-footer">
             <form onSubmit={handleCommandSubmit} className="lisa-command-form">
               <input
                 type="text"
-                placeholder="Ask or command (e.g. 'next', 'start')..."
+                placeholder="Or type voice command (e.g. 'Next', 'Start')..."
                 value={typedInput}
                 onChange={(e) => setTypedInput(e.target.value)}
                 className="lisa-text-input"
@@ -295,33 +284,14 @@ export default function LisaAssistant({
               </button>
             </form>
 
-            <div className="lisa-quick-bar">
+            {hintActionText && onAdvanceStage && (
               <button
                 type="button"
-                className={`lisa-mic-toggle ${isListening ? "active" : ""}`}
-                onClick={toggleListening}
-                title={isListening ? "Stop listening" : "Speak command"}
-                aria-label="Voice input"
+                className="lisa-action-pill"
+                onClick={onAdvanceStage}
               >
-                {isListening ? <MicOff size={13} /> : <Mic size={13} />}
-                <span>{isListening ? "Listening..." : "Speak"}</span>
+                {hintActionText}
               </button>
-
-              {hintActionText && onAdvanceStage && (
-                <button
-                  type="button"
-                  className="lisa-action-pill"
-                  onClick={onAdvanceStage}
-                >
-                  {hintActionText}
-                </button>
-              )}
-            </div>
-
-            {feedbackMessage && (
-              <div className="lisa-feedback-small" role="status">
-                {feedbackMessage}
-              </div>
             )}
           </div>
         </div>

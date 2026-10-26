@@ -18,9 +18,11 @@ describe("KERNEL 3D Guided Workflow & System Integration", () => {
       "SYSTEM_CONFIG",
       "PROCESS_NAMING",
       "RESOURCE_NAMING",
+      "EXPLORING_3D",
       "ALLOCATION_INPUT",
       "SAFETY_ANALYSIS",
       "SIMULATION_3D",
+      "SESSION_ENDED",
     ] as const;
 
     requiredStages.forEach((stage) => {
@@ -29,19 +31,16 @@ describe("KERNEL 3D Guided Workflow & System Integration", () => {
     });
 
     expect(STAGE_DIALOGUES.WELCOME).toContain(
-      "Hi, I'm Lisa. Welcome to Banker's Algorithm. Say Start to begin the simulation.",
+      "Hi, I'm Lisa, welcome to Banker's Algorithm Simulation. Please allow microphone access to proceed.",
     );
     expect(STAGE_DIALOGUES.SYSTEM_CONFIG).toContain(
-      "Before we begin, enter the number of processes and resource types you want to simulate.",
+      "Cool. We need the number of processes. Tell me how many processes you want.",
     );
-    expect(STAGE_DIALOGUES.PROCESS_NAMING).toContain(
-      "Great! Now enter the names of your processes.",
-    );
-    expect(STAGE_DIALOGUES.RESOURCE_NAMING).toContain(
-      "Now enter the names of your resource types",
+    expect(STAGE_DIALOGUES.EXPLORING_3D).toContain(
+      "This is the 3D view. Processes are represented by boxes, and resource types are represented by spheres. You can explore the scene. Say 'Next' when you're ready.",
     );
     expect(STAGE_DIALOGUES.ALLOCATION_INPUT).toContain(
-      "Good! Now enter the allocated and maximum resources for each process",
+      "No need to type. This is a predefined matrix of Allocation and Maximum values. Say what you want to change, or say 'Skip' to continue.",
     );
   });
 

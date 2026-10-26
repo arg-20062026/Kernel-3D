@@ -4,6 +4,8 @@ import {
   Eye,
   Sliders,
   Info,
+  LogOut,
+  Mic,
 } from "lucide-react";
 import type { SimulationModel } from "../types/simulation";
 import type { SafetyResult } from "../algorithm/banker";
@@ -16,6 +18,7 @@ interface Simulation3DStageProps {
   safetyResult: SafetyResult;
   onBackToAnalysis: () => void;
   onBackToMatrices: () => void;
+  onExitSession: () => void;
   resourceColors: string[];
 }
 
@@ -43,6 +46,7 @@ export default function Simulation3DStage({
   safetyResult,
   onBackToAnalysis,
   onBackToMatrices,
+  onExitSession,
   resourceColors,
 }: Simulation3DStageProps) {
   const [stepIndex, setStepIndex] = useState(0);
@@ -70,7 +74,7 @@ export default function Simulation3DStage({
       <div className="stage-panel-header">
         <div className="header-flex">
           <div>
-            <span className="eyebrow">STAGE 07 / 3D CINEMATIC RUNTIME</span>
+            <span className="eyebrow">STAGE 06 / 3D CINEMATIC EXECUTION</span>
             <h2>Resource Universe 3D</h2>
             <p className="panel-description">
               Interactive 3D simulation of process execution, resource acquisition,
@@ -93,7 +97,22 @@ export default function Simulation3DStage({
             >
               <ArrowLeft size={14} /> Safety Analysis
             </button>
+            <button
+              type="button"
+              className="secondary-button danger-tint"
+              onClick={onExitSession}
+              title="End simulation session"
+            >
+              <LogOut size={14} /> Exit Session
+            </button>
           </div>
+        </div>
+      </div>
+
+      <div className="voice-prompt-banner">
+        <Mic size={18} className="pulse-cyan" />
+        <div>
+          <strong>Voice Controls:</strong> Say &ldquo;Play&rdquo;, &ldquo;Pause&rdquo;, &ldquo;Next&rdquo;, &ldquo;Reset&rdquo;, or say &ldquo;Exit&rdquo; to finish your laboratory session.
         </div>
       </div>
 
@@ -183,13 +202,22 @@ export default function Simulation3DStage({
           <ArrowLeft size={16} /> Back to Safety Analysis
         </button>
 
-        <button
-          type="button"
-          className="secondary-button"
-          onClick={onBackToMatrices}
-        >
-          <Sliders size={16} /> Edit System Matrices
-        </button>
+        <div className="stage-actions-right">
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={onBackToMatrices}
+          >
+            <Sliders size={16} /> Edit System Matrices
+          </button>
+          <button
+            type="button"
+            className="primary-button danger-tint"
+            onClick={onExitSession}
+          >
+            <LogOut size={16} /> Say &ldquo;Exit&rdquo; / End Session
+          </button>
+        </div>
       </div>
     </div>
   );

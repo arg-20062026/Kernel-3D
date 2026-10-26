@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { Canvas } from "@react-three/fiber";
-import { Float, Line, OrbitControls, Stars, Html } from "@react-three/drei";
+import { Float, Line, OrbitControls, Html } from "@react-three/drei";
 import type { SimulationModel } from "../types/simulation";
 import type { SafetyResult } from "../algorithm/banker";
 import {
@@ -53,20 +53,13 @@ export default function DynamicResourceScene({
         dpr={[1, 2]}
         gl={{ antialias: true, alpha: false }}
       >
-        <color attach="background" args={["#050811"]} />
-        <ambientLight intensity={1.2} />
-        <pointLight position={[0, 5, 6]} intensity={32} color="#55e8ff" />
-        <pointLight position={[-5, -3, 4]} intensity={22} color="#a78bfa" />
-        <Stars
-          radius={80}
-          depth={40}
-          count={prefersReducedMotion ? 600 : 1800}
-          factor={2}
-          fade
-          speed={prefersReducedMotion ? 0 : 0.4}
-        />
+        <color attach="background" args={["#f8fafc"]} />
+        <ambientLight intensity={1.4} />
+        <directionalLight position={[5, 10, 7]} intensity={1.8} color="#ffffff" />
+        <pointLight position={[0, 4, 6]} intensity={18} color="#0284c7" />
+        <pointLight position={[-5, -3, 4]} intensity={14} color="#6366f1" />
 
-        {/* RESOURCE NODES */}
+        {/* RESOURCE NODES — Futuristic Spheres */}
         {resourcePositions.map((pos, rIndex) => {
           const color = resourceColors[rIndex % resourceColors.length];
           const rName = model.resourceNames[rIndex] ?? `R${rIndex}`;
@@ -79,16 +72,22 @@ export default function DynamicResourceScene({
                 rotationIntensity={prefersReducedMotion ? 0 : 0.3}
                 floatIntensity={prefersReducedMotion ? 0 : 0.4}
               >
+                {/* Glowing Core Sphere */}
                 <mesh>
-                  <octahedronGeometry args={[0.42, 0]} />
+                  <sphereGeometry args={[0.38, 32, 32]} />
                   <meshStandardMaterial
                     color={color}
                     emissive={color}
-                    emissiveIntensity={0.65}
-                    metalness={0.7}
+                    emissiveIntensity={0.45}
+                    metalness={0.3}
                     roughness={0.2}
-                    wireframe
                   />
+                </mesh>
+
+                {/* Orbiting Ring */}
+                <mesh rotation={[Math.PI / 3, 0, 0]}>
+                  <torusGeometry args={[0.52, 0.015, 8, 36]} />
+                  <meshBasicMaterial color={color} transparent opacity={0.7} />
                 </mesh>
 
                 <Html
@@ -111,7 +110,7 @@ export default function DynamicResourceScene({
           );
         })}
 
-        {/* PROCESS NODES & CONNECTIONS */}
+        {/* PROCESS NODES — Futuristic Boxes */}
         {processPositions.map((pos, pIndex) => {
           const isActive = activeProcess === pIndex;
           const isCompleted = completedProcesses.includes(pIndex);
@@ -120,12 +119,12 @@ export default function DynamicResourceScene({
             safetyResult.unfinishedProcesses.includes(pIndex);
 
           const nodeColor = isActive
-            ? "#facc15" // Yellow active
+            ? "#eab308" // Gold active
             : isCompleted
-              ? "#34d399" // Green completed
+              ? "#10b981" // Emerald completed
               : isBlocked
-                ? "#ff718c" // Coral blocked
-                : "#a78bfa"; // Violet pending
+                ? "#ef4444" // Crimson blocked
+                : "#6366f1"; // Indigo pending
 
           const pName = model.processNames[pIndex] ?? `P${pIndex}`;
 
@@ -149,7 +148,7 @@ export default function DynamicResourceScene({
                     color={rColor}
                     lineWidth={lineThickness}
                     transparent
-                    opacity={isActive || isCompleted ? 0.85 : 0.28}
+                    opacity={isActive || isCompleted ? 0.9 : 0.35}
                   />
                 );
               })}
@@ -159,31 +158,32 @@ export default function DynamicResourceScene({
                 rotationIntensity={prefersReducedMotion ? 0 : 0.2}
                 floatIntensity={prefersReducedMotion ? 0 : 0.25}
               >
-                {/* Process Core Sphere */}
+                {/* Futuristic Box Body */}
                 <mesh>
-                  <sphereGeometry args={[0.22, 28, 28]} />
+                  <boxGeometry args={[0.55, 0.55, 0.55]} />
                   <meshStandardMaterial
                     color={nodeColor}
                     emissive={nodeColor}
-                    emissiveIntensity={isActive ? 1.9 : 0.7}
-                    metalness={0.4}
-                    roughness={0.2}
+                    emissiveIntensity={isActive ? 0.9 : 0.35}
+                    metalness={0.2}
+                    roughness={0.25}
                   />
                 </mesh>
 
-                {/* Orbiting halo ring */}
-                <mesh rotation={[Math.PI / 2.3, 0, 0]}>
-                  <torusGeometry args={[0.36, 0.02, 10, 48]} />
+                {/* Beveled Wireframe Edge Frame */}
+                <mesh>
+                  <boxGeometry args={[0.57, 0.57, 0.57]} />
                   <meshBasicMaterial
                     color={nodeColor}
+                    wireframe
                     transparent
-                    opacity={isActive ? 0.95 : 0.65}
+                    opacity={isActive ? 0.95 : 0.5}
                   />
                 </mesh>
 
                 {/* 3D Label */}
                 <Html
-                  position={[0, 0.62, 0]}
+                  position={[0, 0.65, 0]}
                   center
                   distanceFactor={10}
                   className="scene-3d-label proc-label"
@@ -212,7 +212,7 @@ export default function DynamicResourceScene({
           minDistance={4.5}
           maxDistance={16}
           autoRotate={!prefersReducedMotion}
-          autoRotateSpeed={0.25}
+          autoRotateSpeed={0.2}
         />
       </Canvas>
     </div>

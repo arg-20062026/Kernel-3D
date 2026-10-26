@@ -79,3 +79,62 @@ export function createEmptyMatrix(rows: number, cols: number, fill = 0): number[
 export function createEmptyVector(length: number, fill = 0): number[] {
   return Array.from({ length }, () => fill);
 }
+
+
+/**
+ * Deterministically generates a valid predefined matrix configuration
+ * for arbitrary process and resource counts.
+ * Uses textbook presets when dimensions match, otherwise computes
+ * a strictly validated model where Allocation <= Maximum.
+ */
+export function generateDeterministicPreset(
+  processCount: number,
+  resourceCount: number,
+): SimulationModel {
+  if (processCount === 5 && resourceCount === 3) {
+    return structuredClone(CLASSIC_5X3_PRESET);
+  }
+  if (processCount === 4 && resourceCount === 2) {
+    return structuredClone(UNSAFE_PRESET);
+  }
+  if (processCount === 3 && resourceCount === 2) {
+    return structuredClone(COMPACT_3X2_PRESET);
+  }
+
+  const processNames = createDefaultProcessNames(processCount);
+  const resourceNames = createDefaultResourceNames(resourceCount);
+
+  const allocation: number[][] = [];
+  const max: number[][] = [];
+
+  for (let i = 0; i < processCount; i++) {
+    const allocRow: number[] = [];
+    const maxRow: number[] = [];
+    for (let j = 0; j < resourceCount; j++) {
+      // Deterministic allocation: small safe numbers
+      const allocVal = (i + j) % 3;
+      allocRow.push(allocVal);
+      // Max claim is always >= allocation
+      const neededExtra = ((i * 2 + j) % 3) + 1;
+      maxRow.push(allocVal + neededExtra);
+    }
+    allocation.push(allocRow);
+    max.push(maxRow);
+  }
+
+  // Generous available vector so initial processes can complete
+  const available: number[] = Array.from(
+    { length: resourceCount },
+    (_, j) => 2 + (j % 2),
+  );
+
+  return {
+    processCount,
+    resourceCount,
+    processNames,
+    resourceNames,
+    allocation,
+    max,
+    available,
+  };
+}

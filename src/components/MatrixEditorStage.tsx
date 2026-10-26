@@ -6,6 +6,8 @@ import {
   AlertTriangle,
   RotateCcw,
   Sparkles,
+  Mic,
+  FastForward,
 } from "lucide-react";
 import type { SimulationModel } from "../types/simulation";
 import { calculateNeed } from "../algorithm/banker";
@@ -15,6 +17,7 @@ interface MatrixEditorStageProps {
   model: SimulationModel;
   onUpdateModel: (updater: (prev: SimulationModel) => SimulationModel) => void;
   onAnalyze: () => void;
+  onSkip: () => void;
   onBack: () => void;
   onReset: () => void;
   resourceColors: string[];
@@ -24,6 +27,7 @@ export default function MatrixEditorStage({
   model,
   onUpdateModel,
   onAnalyze,
+  onSkip,
   onBack,
   onReset,
   resourceColors,
@@ -106,11 +110,11 @@ export default function MatrixEditorStage({
       <div className="stage-panel-header">
         <div className="header-flex">
           <div>
-            <span className="eyebrow">STAGE 05 / RESOURCE ALLOCATION MATRICES</span>
-            <h2>State Matrix Editor</h2>
+            <span className="eyebrow">STAGE 04 / RESOURCE MATRICES</span>
+            <h2>Predefined Matrix Configuration</h2>
             <p className="panel-description">
-              Enter current allocations, declared maximum claims, and unallocated available instances.
-              The Need matrix updates dynamically via $Need[i][j] = Max[i][j] - Allocation[i][j]$.
+              No need to type! Review the generated Allocation and Maximum matrices.
+              You can speak edits or say &ldquo;Skip&rdquo; / &ldquo;Next&rdquo; to analyze safety.
             </p>
           </div>
           <div className="header-action-group">
@@ -120,7 +124,7 @@ export default function MatrixEditorStage({
               onClick={() => loadPreset(CLASSIC_5X3_PRESET)}
               title="Load standard 5x3 textbook dataset"
             >
-              <Sparkles size={14} /> Load 5×3 Preset
+              <Sparkles size={14} /> 5×3 Preset
             </button>
             <button
               type="button"
@@ -128,7 +132,7 @@ export default function MatrixEditorStage({
               onClick={() => loadPreset(UNSAFE_PRESET)}
               title="Load 4x2 unsafe dataset"
             >
-              <AlertTriangle size={14} /> Load Unsafe Preset
+              <AlertTriangle size={14} /> Unsafe Preset
             </button>
             <button
               type="button"
@@ -139,6 +143,18 @@ export default function MatrixEditorStage({
               <RotateCcw size={14} /> Reset
             </button>
           </div>
+        </div>
+      </div>
+
+      {/* Voice-First Matrix Commands Banner */}
+      <div className="voice-prompt-banner">
+        <Mic size={22} className="pulse-cyan" />
+        <div>
+          <strong>Voice Editing Active:</strong>
+          <span>
+            Say &ldquo;Change Allocation of P1 to 2 0 0&rdquo; &bull; &ldquo;Change Max of P0 to 7 5 3&rdquo; &bull;
+            Say &ldquo;Skip&rdquo; to keep predefined matrix &bull; Say &ldquo;Next&rdquo; to analyze.
+          </span>
         </div>
       </div>
 
@@ -183,7 +199,7 @@ export default function MatrixEditorStage({
               <h3>ALLOCATION MATRIX</h3>
               <span className="matrix-sub">Currently held instances</span>
             </div>
-            <span className="matrix-badge">EDITABLE</span>
+            <span className="matrix-badge">VOICE EDITABLE</span>
           </div>
 
           <div className="table-responsive">
@@ -239,9 +255,9 @@ export default function MatrixEditorStage({
           <div className="matrix-card-header">
             <div>
               <h3>MAXIMUM CLAIM MATRIX</h3>
-              <span className="matrix-sub">Maximum potential instances</span>
+              <span className="matrix-sub">Declared maximum instances</span>
             </div>
-            <span className="matrix-badge">EDITABLE</span>
+            <span className="matrix-badge">VOICE EDITABLE</span>
           </div>
 
           <div className="table-responsive">
@@ -385,24 +401,32 @@ export default function MatrixEditorStage({
       )}
 
       <div className="stage-actions-row">
-        <button
-          type="button"
-          className="secondary-button"
-          onClick={onBack}
-        >
-          <ArrowLeft size={16} /> Back to Naming
+        <button type="button" className="secondary-button" onClick={onBack}>
+          <ArrowLeft size={16} /> Back to 3D View
         </button>
 
-        <button
-          type="button"
-          className="primary-button"
-          onClick={onAnalyze}
-          disabled={!isValid}
-        >
-          <ShieldCheck size={18} />
-          <span>Analyze System Safety</span>
-          <ArrowRight size={16} />
-        </button>
+        <div className="stage-actions-right">
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={onSkip}
+            title="Keep predefined matrix configuration"
+          >
+            <FastForward size={16} />
+            <span>Say &ldquo;Skip&rdquo; / Keep Predefined</span>
+          </button>
+
+          <button
+            type="button"
+            className="primary-button"
+            onClick={onAnalyze}
+            disabled={!isValid}
+          >
+            <ShieldCheck size={18} />
+            <span>Say &ldquo;Next&rdquo; / Analyze Safety</span>
+            <ArrowRight size={16} />
+          </button>
+        </div>
       </div>
     </div>
   );

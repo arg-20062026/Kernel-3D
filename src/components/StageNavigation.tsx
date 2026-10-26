@@ -1,11 +1,10 @@
 import {
   Sparkles,
   Sliders,
-  Users,
-  Layers,
+  Box,
   TableProperties,
   ShieldCheck,
-  Box,
+  Play,
   Check,
 } from "lucide-react";
 import type { SimulationStage } from "../types/simulation";
@@ -23,11 +22,10 @@ const STAGES: {
 }[] = [
   { id: "WELCOME", label: "Welcome", icon: Sparkles },
   { id: "SYSTEM_CONFIG", label: "Dimensions", icon: Sliders },
-  { id: "PROCESS_NAMING", label: "Processes", icon: Users },
-  { id: "RESOURCE_NAMING", label: "Resources", icon: Layers },
-  { id: "ALLOCATION_INPUT", label: "Matrices", icon: TableProperties },
-  { id: "SAFETY_ANALYSIS", label: "Safety", icon: ShieldCheck },
-  { id: "SIMULATION_3D", label: "3D Universe", icon: Box },
+  { id: "EXPLORING_3D", label: "3D Universe", icon: Box },
+  { id: "ALLOCATION_INPUT", label: "Predefined Matrices", icon: TableProperties },
+  { id: "SAFETY_ANALYSIS", label: "Safety Verification", icon: ShieldCheck },
+  { id: "SIMULATION_3D", label: "Execution Trace", icon: Play },
 ];
 
 export default function StageNavigation({
@@ -43,7 +41,7 @@ export default function StageNavigation({
         {STAGES.map((step, idx) => {
           const Icon = step.icon;
           const isActive = step.id === currentStage;
-          const isDone = idx < currentIndex;
+          const isDone = currentIndex !== -1 && idx < currentIndex;
           const isAccessible = canNavigateTo(step.id);
 
           return (

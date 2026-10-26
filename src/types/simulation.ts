@@ -3,9 +3,27 @@ export type SimulationStage =
   | "SYSTEM_CONFIG"
   | "PROCESS_NAMING"
   | "RESOURCE_NAMING"
+  | "EXPLORING_3D"
   | "ALLOCATION_INPUT"
   | "SAFETY_ANALYSIS"
-  | "SIMULATION_3D";
+  | "SIMULATION_3D"
+  | "SESSION_ENDED";
+
+export type VoiceWorkflowState =
+  | "awaiting-activation"
+  | "requesting-microphone"
+  | "welcoming"
+  | "awaiting-start"
+  | "asking-process-count"
+  | "asking-resource-count"
+  | "exploring-3d"
+  | "awaiting-matrix-choice"
+  | "editing-matrix"
+  | "awaiting-matrix-confirmation"
+  | "analyzing-safety"
+  | "explaining-execution"
+  | "session-ended"
+  | "recoverable-error";
 
 export interface SystemDimensions {
   processCount: number;

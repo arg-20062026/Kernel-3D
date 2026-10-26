@@ -1,53 +1,95 @@
-import { useState, useMemo, lazy, Suspense } from "react";
+import { useState, useMemo, lazy, Suspense, useEffect, useCallback, useRef } from "react";
 import {
   Cpu,
   RotateCcw,
   AlertTriangle,
   Activity,
+  Volume2,
+  VolumeX,
 } from "lucide-react";
-import type { SimulationStage, SimulationModel } from "./types/simulation";
+import type {
+  SimulationStage,
+  SimulationModel,
+  VoiceWorkflowState,
+} from "./types/simulation";
 import {
   CLASSIC_5X3_PRESET,
   UNSAFE_PRESET,
-  createDefaultProcessNames,
-  createDefaultResourceNames,
-  createEmptyMatrix,
-  createEmptyVector,
+  generateDeterministicPreset,
 } from "./data/presets";
-import { STAGE_DIALOGUES } from "./data/dialogues";
-import { calculateNeed, runSafetyAlgorithm, type SafetyResult } from "./algorithm/banker";
+import { STAGE_DIALOGUES, WORKFLOW_PROMPTS } from "./data/dialogues";
+import {
+  calculateNeed,
+  runSafetyAlgorithm,
+  type SafetyResult,
+} from "./algorithm/banker";
+import { speechManager } from "./utils/speech";
+import {
+  normalizeVoiceInput,
+  parseProcessCount,
+  parseResourceCount,
+  parseMatrixEditCommand,
+  isExactCommand,
+} from "./utils/voiceCommander";
 
 import StageNavigation from "./components/StageNavigation";
 import WelcomeStage from "./components/WelcomeStage";
 import SystemConfigStage from "./components/SystemConfigStage";
-import ProcessNamingStage from "./components/ProcessNamingStage";
-import ResourceNamingStage from "./components/ResourceNamingStage";
+import Exploring3DStage from "./components/Exploring3DStage";
 import MatrixEditorStage from "./components/MatrixEditorStage";
 import SafetyAnalysisStage from "./components/SafetyAnalysisStage";
-import LisaAssistant from "./components/LisaAssistant";
+import SessionEndedStage from "./components/SessionEndedStage";
+import LisaAssistant, { type AssistantVisualState } from "./components/LisaAssistant";
+import VoiceActivationOverlay from "./components/VoiceActivationOverlay";
 import "./App.css";
 
-// Lazy load 3D Scene to keep initial bundle ultra-lean
+// Lazy load 3D Execution Stage to keep initial bundle ultra-lean
 const Simulation3DStage = lazy(
   () => import("./components/Simulation3DStage"),
 );
 
 const RESOURCE_COLOR_PALETTE = [
-  "#55e8ff", // cyan
-  "#a78bfa", // purple
-  "#55f0b5", // emerald green
-  "#f472b6", // rose
-  "#fbbf24", // amber
-  "#60a5fa", // sky blue
+  "#0284c7", // Sky blue
+  "#7c3aed", // Violet
+  "#059669", // Emerald
+  "#db2777", // Pink
+  "#d97706", // Amber
+  "#2563eb", // Royal blue
 ];
 
 export default function App() {
   const [stage, setStage] = useState<SimulationStage>("WELCOME");
+  const [workflowState, setWorkflowState] =
+    useState<VoiceWorkflowState>("awaiting-activation");
   const [model, setModel] = useState<SimulationModel>(() =>
     structuredClone(CLASSIC_5X3_PRESET),
   );
   const [dialogue, setDialogue] = useState<string>(STAGE_DIALOGUES.WELCOME);
+
+  const [isActivated, setIsActivated] = useState<boolean>(false);
+  const [isMuted, setIsMuted] = useState<boolean>(false);
+  const [isListening, setIsListening] = useState<boolean>(false);
+  const [isSpeaking, setIsSpeaking] = useState<boolean>(false);
+  const [lastTranscript, setLastTranscript] = useState<string>("");
+  const [lastCommandStatus, setLastCommandStatus] = useState<{
+    type: "accepted" | "rejected" | "clarify";
+    message: string;
+  } | null>(null);
+
   const [showResetModal, setShowResetModal] = useState(false);
+  const [configErrorMessage, setConfigErrorMessage] = useState<string | null>(null);
+  const [isAskingProcess, setIsAskingProcess] = useState<boolean>(true);
+
+  // References to keep current state accessible inside continuous recognition callbacks
+  const stateRef = useRef({
+    stage,
+    workflowState,
+    model,
+    isAskingProcess,
+  });
+  useEffect(() => {
+    stateRef.current = { stage, workflowState, model, isAskingProcess };
+  }, [stage, workflowState, model, isAskingProcess]);
 
   // Compute safety result whenever model matrices change
   const safetyResult: SafetyResult | null = useMemo(() => {
@@ -63,232 +105,414 @@ export default function App() {
     }
   }, [model.allocation, model.max, model.available]);
 
-  // Stage transition helper
-  const navigateTo = (nextStage: SimulationStage, customDialogue?: string) => {
-    setStage(nextStage);
-    setDialogue(customDialogue ?? STAGE_DIALOGUES[nextStage]);
+  // Central speech announcer
+  const announceSpeech = useCallback((text: string) => {
+    setDialogue(text);
+    if (!isMuted) {
+      setIsSpeaking(true);
+      speechManager.speak(text, {
+        onStart: () => setIsSpeaking(true),
+        onEnd: () => setIsSpeaking(false),
+        onError: () => setIsSpeaking(false),
+      });
+    }
+  }, [isMuted]);
+
+  const handleVoiceCommandRef = useRef<(rawCommand: string) => void>(() => {});
+
+  // Single-gesture audio and mic activator
+  const handleActivateVoice = async () => {
+    await speechManager.unlockAudioContext();
+    setIsActivated(true);
+    setWorkflowState("awaiting-start");
+    setStage("WELCOME");
+
+    // Start continuous speech recognition
+    speechManager.startListening({
+      onStart: () => setIsListening(true),
+      onResult: (transcript, isFinal) => {
+        setLastTranscript(transcript);
+        if (isFinal) {
+          handleVoiceCommandRef.current(transcript);
+        }
+      },
+      onError: (err) => {
+        setLastCommandStatus({
+          type: "rejected",
+          message: err,
+        });
+      },
+      onEnd: () => {
+        setIsListening(speechManager.getIsListening());
+      },
+    });
+
+    // Speak welcome greeting
+    announceSpeech(STAGE_DIALOGUES.WELCOME);
   };
 
-  // Stage accessibility guard
+  // Stage transition helper
+  const navigateTo = (nextStage: SimulationStage, nextWorkflow: VoiceWorkflowState, promptText?: string) => {
+    setStage(nextStage);
+    setWorkflowState(nextWorkflow);
+    const speech = promptText ?? WORKFLOW_PROMPTS[nextWorkflow] ?? STAGE_DIALOGUES[nextStage];
+    announceSpeech(speech);
+  };
+
+  // Voice Command Dispatcher with explicit state machine guards
+  const handleVoiceCommand = (rawCommand: string) => {
+    const { stage: curStage, workflowState: curWorkflow, model: curModel, isAskingProcess: curAskingProcess } = stateRef.current;
+    const clean = normalizeVoiceInput(rawCommand);
+    if (!clean) return;
+
+    // Global EXIT command
+    if (isExactCommand(clean, "exit")) {
+      speechManager.stopSpeaking();
+      speechManager.stopListening();
+      setIsListening(false);
+      setIsSpeaking(false);
+      setStage("SESSION_ENDED");
+      setWorkflowState("session-ended");
+      setLastCommandStatus({
+        type: "accepted",
+        message: "Session ended. Audio and microphone released.",
+      });
+      announceSpeech(STAGE_DIALOGUES.SESSION_ENDED);
+      return;
+    }
+
+    // Global RESTART command
+    if (isExactCommand(clean, "reset") || clean === "restart") {
+      setModel(structuredClone(CLASSIC_5X3_PRESET));
+      setIsAskingProcess(true);
+      navigateTo("WELCOME", "awaiting-start", "Simulation restarted. Say Start to begin.");
+      setLastCommandStatus({
+        type: "accepted",
+        message: "Simulation reset to initial state.",
+      });
+      return;
+    }
+
+    // STATE: awaiting-start or WELCOME
+    if (curWorkflow === "awaiting-start" || curStage === "WELCOME") {
+      if (isExactCommand(clean, "start")) {
+        setLastCommandStatus({
+          type: "accepted",
+          message: "Command 'Start' accepted. Moving to Dimensions.",
+        });
+        setIsAskingProcess(true);
+        navigateTo(
+          "SYSTEM_CONFIG",
+          "asking-process-count",
+          "Cool. We need the number of processes. Tell me how many processes you want.",
+        );
+        return;
+      }
+      if (clean.includes("classic") || clean.includes("textbook")) {
+        setModel(structuredClone(CLASSIC_5X3_PRESET));
+        setLastCommandStatus({
+          type: "accepted",
+          message: "Loaded classic 5x3 textbook preset.",
+        });
+        navigateTo("SAFETY_ANALYSIS", "analyzing-safety", "Classic 5 processes and 3 resources dataset loaded. Let's analyze safety.");
+        return;
+      }
+      if (clean.includes("unsafe") || clean.includes("deadlock")) {
+        setModel(structuredClone(UNSAFE_PRESET));
+        setLastCommandStatus({
+          type: "accepted",
+          message: "Loaded 4x2 unsafe preset.",
+        });
+        navigateTo("SAFETY_ANALYSIS", "analyzing-safety", "Unsafe dataset loaded. Notice how the safety algorithm detects deadlock risk.");
+        return;
+      }
+    }
+
+    // STATE: SYSTEM_CONFIG (asking process or resource count)
+    if (curStage === "SYSTEM_CONFIG") {
+      if (curAskingProcess) {
+        const count = parseProcessCount(clean);
+        if (count !== null) {
+          if (count >= 1 && count <= 10) {
+            setConfigErrorMessage(null);
+            setModel((prev) => generateDeterministicPreset(count, prev.resourceCount));
+            setIsAskingProcess(false);
+            setWorkflowState("asking-resource-count");
+            setLastCommandStatus({
+              type: "accepted",
+              message: `Process count set to ${count}.`,
+            });
+            announceSpeech("Now tell me the number of resource types.");
+            return;
+          } else {
+            setConfigErrorMessage("Process count must be between 1 and 10.");
+            setLastCommandStatus({
+              type: "clarify",
+              message: "Please choose between 1 and 10 processes.",
+            });
+            announceSpeech("Please tell me a number between 1 and 10 for processes.");
+            return;
+          }
+        }
+      } else {
+        const rCount = parseResourceCount(clean);
+        if (rCount !== null) {
+          if (rCount >= 1 && rCount <= 6) {
+            setConfigErrorMessage(null);
+            setModel((prev) => generateDeterministicPreset(prev.processCount, rCount));
+            setLastCommandStatus({
+              type: "accepted",
+              message: `Resource count set to ${rCount}.`,
+            });
+            navigateTo(
+              "EXPLORING_3D",
+              "exploring-3d",
+              "This is the 3D view. Processes are represented by boxes, and resource types are represented by spheres. You can explore the scene. Say 'Next' when you're ready.",
+            );
+            return;
+          } else {
+            setConfigErrorMessage("Resource types must be between 1 and 6.");
+            setLastCommandStatus({
+              type: "clarify",
+              message: "Please choose between 1 and 6 resource types.",
+            });
+            announceSpeech("Please tell me a number between 1 and 6 for resource types.");
+            return;
+          }
+        }
+      }
+
+      if (isExactCommand(clean, "next")) {
+        navigateTo(
+          "EXPLORING_3D",
+          "exploring-3d",
+          "This is the 3D view. Processes are represented by boxes, and resource types are represented by spheres. You can explore the scene. Say 'Next' when you're ready.",
+        );
+        return;
+      }
+      if (isExactCommand(clean, "back")) {
+        navigateTo("WELCOME", "awaiting-start", "Back to start. Say Start to begin.");
+        return;
+      }
+    }
+
+    // STATE: EXPLORING_3D
+    if (curStage === "EXPLORING_3D") {
+      if (isExactCommand(clean, "next") || isExactCommand(clean, "skip")) {
+        setLastCommandStatus({
+          type: "accepted",
+          message: "Advancing to predefined matrices.",
+        });
+        navigateTo(
+          "ALLOCATION_INPUT",
+          "awaiting-matrix-choice",
+          "No need to type. This is a predefined matrix of Allocation and Maximum values. Say what you want to change, or say 'Skip' to continue.",
+        );
+        return;
+      }
+      if (isExactCommand(clean, "back")) {
+        setIsAskingProcess(false);
+        navigateTo("SYSTEM_CONFIG", "asking-resource-count", "Back to system dimensions.");
+        return;
+      }
+    }
+
+    // STATE: ALLOCATION_INPUT (Voice matrix editing or skip/next)
+    if (curStage === "ALLOCATION_INPUT") {
+      if (isExactCommand(clean, "skip") || isExactCommand(clean, "next")) {
+        setLastCommandStatus({
+          type: "accepted",
+          message: "Predefined matrices confirmed. Analyzing safety.",
+        });
+        navigateTo("SAFETY_ANALYSIS", "analyzing-safety", "Safety analysis complete. Let's inspect the safe sequence.");
+        return;
+      }
+
+      if (isExactCommand(clean, "back")) {
+        navigateTo("EXPLORING_3D", "exploring-3d", "Returning to 3D scene.");
+        return;
+      }
+
+      // Check if command is a matrix row edit
+      if (clean.includes("change") || clean.includes("set")) {
+        const parseRes = parseMatrixEditCommand(clean, curModel.processCount, curModel.resourceCount);
+        if (parseRes.success) {
+          const { matrixType, processIndex, values } = parseRes.edit;
+
+          // Validate Allocation <= Max
+          if (matrixType === "allocation") {
+            const exceeds = values.some((val, j) => val > (curModel.max[processIndex]?.[j] ?? 0));
+            if (exceeds) {
+              setLastCommandStatus({
+                type: "rejected",
+                message: "Allocation cannot exceed Maximum claim for any resource.",
+              });
+              announceSpeech("Allocation cannot exceed Maximum claim. Please specify valid values.");
+              return;
+            }
+          } else {
+            const violatesAlloc = values.some((val, j) => val < (curModel.allocation[processIndex]?.[j] ?? 0));
+            if (violatesAlloc) {
+              setLastCommandStatus({
+                type: "rejected",
+                message: "Maximum claim cannot be less than currently held Allocation.",
+              });
+              announceSpeech("Maximum claim cannot be less than currently held Allocation.");
+              return;
+            }
+          }
+
+          // Apply edit
+          setModel((prev) => {
+            const next = structuredClone(prev);
+            next[matrixType][processIndex] = [...values];
+            return next;
+          });
+
+          setLastCommandStatus({
+            type: "accepted",
+            message: `Updated ${matrixType} for P${processIndex} to [${values.join(", ")}].`,
+          });
+          announceSpeech(`Updated ${matrixType} for process P${processIndex} to ${values.join(", ")}. Say another change, or say 'Next' to analyze.`);
+          return;
+        } else {
+          setLastCommandStatus({
+            type: "clarify",
+            message: parseRes.error,
+          });
+          announceSpeech(parseRes.error);
+          return;
+        }
+      }
+    }
+
+    // STATE: SAFETY_ANALYSIS
+    if (curStage === "SAFETY_ANALYSIS") {
+      if (isExactCommand(clean, "next") || clean.includes("3d") || clean.includes("simulate")) {
+        setLastCommandStatus({
+          type: "accepted",
+          message: "Launching 3D Execution Trace.",
+        });
+        navigateTo("SIMULATION_3D", "explaining-execution", "Watch as processes execute in safe sequence order. Each completed process safely returns its allocated resources to the system pool.");
+        return;
+      }
+      if (isExactCommand(clean, "back")) {
+        navigateTo("ALLOCATION_INPUT", "awaiting-matrix-choice", "Returning to matrix review.");
+        return;
+      }
+    }
+
+    // Unrecognized utterance fallback
+    setLastCommandStatus({
+      type: "clarify",
+      message: `Heard "${rawCommand}". Try saying "Start", "Next", "Skip", or "Back".`,
+    });
+  };
+
+  useEffect(() => {
+    handleVoiceCommandRef.current = handleVoiceCommand;
+  });
+
+  // Stage accessibility guard for manual navigation
   const canNavigateTo = (targetStage: SimulationStage): boolean => {
     if (targetStage === "WELCOME") return true;
     if (targetStage === "SYSTEM_CONFIG") return true;
-    if (targetStage === "PROCESS_NAMING") return model.processCount > 0;
-    if (targetStage === "RESOURCE_NAMING")
-      return model.processNames.length === model.processCount;
-    if (targetStage === "ALLOCATION_INPUT")
-      return model.resourceNames.length === model.resourceCount;
-    if (targetStage === "SAFETY_ANALYSIS") {
-      try {
-        calculateNeed(model.allocation, model.max);
-        return true;
-      } catch {
-        return false;
-      }
-    }
-    if (targetStage === "SIMULATION_3D") {
-      return safetyResult !== null;
-    }
+    if (targetStage === "EXPLORING_3D") return model.processCount > 0;
+    if (targetStage === "ALLOCATION_INPUT") return model.resourceCount > 0;
+    if (targetStage === "SAFETY_ANALYSIS") return safetyResult !== null;
+    if (targetStage === "SIMULATION_3D") return safetyResult !== null;
     return false;
   };
 
-  // Voice and text command dispatcher
-  const handleVoiceCommand = (rawCommand: string) => {
-    const cmd = rawCommand.toLowerCase().trim();
-
-    if (cmd.includes("start") || cmd.includes("begin")) {
-      if (stage === "WELCOME") {
-        navigateTo("SYSTEM_CONFIG");
-      }
-      return;
-    }
-
-    if (cmd.includes("classic") || cmd.includes("textbook")) {
-      setModel(structuredClone(CLASSIC_5X3_PRESET));
-      navigateTo(
-        "SAFETY_ANALYSIS",
-        "Classic 5 processes and 3 resources dataset loaded. Let's analyze its safety sequence.",
-      );
-      return;
-    }
-
-    if (cmd.includes("unsafe") || cmd.includes("deadlock")) {
-      setModel(structuredClone(UNSAFE_PRESET));
-      navigateTo(
-        "SAFETY_ANALYSIS",
-        "Unsafe dataset loaded. Notice how the safety algorithm detects deadlock risk.",
-      );
-      return;
-    }
-
-    if (cmd.includes("next") || cmd.includes("continue")) {
-      if (stage === "WELCOME") navigateTo("SYSTEM_CONFIG");
-      else if (stage === "SYSTEM_CONFIG") navigateTo("PROCESS_NAMING");
-      else if (stage === "PROCESS_NAMING") navigateTo("RESOURCE_NAMING");
-      else if (stage === "RESOURCE_NAMING") navigateTo("ALLOCATION_INPUT");
-      else if (stage === "ALLOCATION_INPUT" && canNavigateTo("SAFETY_ANALYSIS"))
-        navigateTo("SAFETY_ANALYSIS");
-      else if (stage === "SAFETY_ANALYSIS" && canNavigateTo("SIMULATION_3D"))
-        navigateTo("SIMULATION_3D");
-      return;
-    }
-
-    if (cmd.includes("back") || cmd.includes("previous")) {
-      if (stage === "SYSTEM_CONFIG") navigateTo("WELCOME");
-      else if (stage === "PROCESS_NAMING") navigateTo("SYSTEM_CONFIG");
-      else if (stage === "RESOURCE_NAMING") navigateTo("PROCESS_NAMING");
-      else if (stage === "ALLOCATION_INPUT") navigateTo("RESOURCE_NAMING");
-      else if (stage === "SAFETY_ANALYSIS") navigateTo("ALLOCATION_INPUT");
-      else if (stage === "SIMULATION_3D") navigateTo("SAFETY_ANALYSIS");
-      return;
-    }
-
-    if (cmd.includes("analyze") || cmd.includes("safety")) {
-      if (canNavigateTo("SAFETY_ANALYSIS")) {
-        navigateTo("SAFETY_ANALYSIS");
-      }
-      return;
-    }
-
-    if (cmd.includes("3d") || cmd.includes("universe") || cmd.includes("simulation")) {
-      if (canNavigateTo("SIMULATION_3D")) {
-        navigateTo("SIMULATION_3D");
-      }
-      return;
-    }
-
-    if (cmd.includes("reset") || cmd.includes("restart")) {
-      setShowResetModal(true);
-      return;
-    }
-
-    // Default friendly fallback
-    setDialogue(`I heard "${rawCommand}". Try saying "Next", "Back", "Analyze", or "3D Universe".`);
-  };
-
-  // Dimensions confirmed in Stage 2
-  const handleDimensionsConfirm = (pCount: number, rCount: number) => {
-    setModel((prev) => {
-      // Re-dimension process names if count changed
-      let pNames = [...prev.processNames];
-      if (pNames.length < pCount) {
-        const extra = createDefaultProcessNames(pCount);
-        pNames = [...pNames, ...extra.slice(pNames.length)];
-      } else {
-        pNames = pNames.slice(0, pCount);
-      }
-
-      // Re-dimension resource names if count changed
-      let rNames = [...prev.resourceNames];
-      if (rNames.length < rCount) {
-        const extra = createDefaultResourceNames(rCount);
-        rNames = [...rNames, ...extra.slice(rNames.length)];
-      } else {
-        rNames = rNames.slice(0, rCount);
-      }
-
-      // Resize allocation matrix
-      const newAlloc = createEmptyMatrix(pCount, rCount, 0);
-      for (let i = 0; i < Math.min(prev.allocation.length, pCount); i++) {
-        for (let j = 0; j < Math.min(prev.allocation[i]?.length || 0, rCount); j++) {
-          newAlloc[i][j] = prev.allocation[i][j];
-        }
-      }
-
-      // Resize max matrix
-      const newMax = createEmptyMatrix(pCount, rCount, 0);
-      for (let i = 0; i < Math.min(prev.max.length, pCount); i++) {
-        for (let j = 0; j < Math.min(prev.max[i]?.length || 0, rCount); j++) {
-          newMax[i][j] = prev.max[i][j];
-        }
-      }
-
-      // Resize available vector
-      const newAvail = createEmptyVector(rCount, 2);
-      for (let j = 0; j < Math.min(prev.available.length, rCount); j++) {
-        newAvail[j] = prev.available[j];
-      }
-
-      return {
-        processCount: pCount,
-        resourceCount: rCount,
-        processNames: pNames,
-        resourceNames: rNames,
-        allocation: newAlloc,
-        max: newMax,
-        available: newAvail,
-      };
-    });
-
-    navigateTo("PROCESS_NAMING");
-  };
-
-  // Process names confirmed in Stage 3
-  const handleProcessNamesConfirm = (names: string[]) => {
-    setModel((prev) => ({ ...prev, processNames: names }));
-    navigateTo("RESOURCE_NAMING");
-  };
-
-  // Resource names confirmed in Stage 4
-  const handleResourceNamesConfirm = (names: string[]) => {
-    setModel((prev) => ({ ...prev, resourceNames: names }));
-    navigateTo("ALLOCATION_INPUT");
-  };
-
-  // Reset to initial classic state
-  const handleGlobalReset = () => {
-    setModel(structuredClone(CLASSIC_5X3_PRESET));
-    setShowResetModal(false);
-    navigateTo("WELCOME", "Simulation reset to initial state. Say Start or click to begin.");
-  };
+  const assistantVisualState: AssistantVisualState = useMemo(() => {
+    if (stage === "SESSION_ENDED") return "session-ended";
+    if (isSpeaking) return "speaking";
+    if (isListening) return "listening";
+    if (stage === "WELCOME") return "welcome";
+    if (lastCommandStatus?.type === "accepted") return "success";
+    if (lastCommandStatus?.type === "rejected") return "error";
+    if (lastCommandStatus?.type === "clarify") return "warning";
+    return "waiting";
+  }, [stage, isSpeaking, isListening, lastCommandStatus]);
 
   return (
-    <main className="app-shell">
-      {/* GLOBAL TOPBAR */}
+    <main className="app-shell light-theme">
+      {/* ONE-TIME VOICE & MICROPHONE ACTIVATION OVERLAY */}
+      {!isActivated && (
+        <VoiceActivationOverlay
+          onActivate={handleActivateVoice}
+          isActivating={false}
+        />
+      )}
+
+      {/* LIGHT-THEME GLOBAL TOPBAR */}
       <header className="topbar">
         <div
           className="brand"
-          onClick={() => navigateTo("WELCOME")}
+          onClick={() => navigateTo("WELCOME", "awaiting-start")}
           role="button"
           tabIndex={0}
           title="Return to Welcome"
         >
           <div className="brand-mark">
-            <Cpu size={23} />
+            <Cpu size={22} />
           </div>
           <div>
             <div className="brand-name">
               KERNEL <span>3D</span>
             </div>
             <div className="brand-subtitle">
-              BANKER'S ALGORITHM LABORATORY
+              VOICE-FIRST BANKER&apos;S ALGORITHM LABORATORY
             </div>
           </div>
         </div>
 
         <div className="system-status">
-          <span className="status-dot" />
-          <span>OS SIMULATOR ONLINE</span>
+          <span className={`status-dot ${isListening ? "listening" : isSpeaking ? "speaking" : "online"}`} />
+          <span>
+            {isSpeaking ? "LISA SPEAKING" : isListening ? "LISTENING ACTIVE" : "VOICE ENGINE READY"}
+          </span>
           <span className="status-divider">/</span>
-          <span className="status-stage-label">STAGE: {stage}</span>
+          <span className="status-stage-label">{stage}</span>
         </div>
 
         <div className="topbar-actions">
           <button
             type="button"
             className="secondary-button"
-            onClick={() => setShowResetModal(true)}
-            title="Reset entire simulation"
+            onClick={() => {
+              const nextMute = !isMuted;
+              setIsMuted(nextMute);
+              speechManager.setMuted(nextMute);
+            }}
+            title={isMuted ? "Unmute Lisa" : "Mute voice output"}
           >
-            <RotateCcw size={14} /> Reset Simulation
+            {isMuted ? <VolumeX size={15} /> : <Volume2 size={15} />}
+            <span>{isMuted ? "Unmute" : "Mute"}</span>
+          </button>
+
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => setShowResetModal(true)}
+            title="Reset simulation"
+          >
+            <RotateCcw size={14} /> Reset
           </button>
         </div>
       </header>
 
-      {/* WORKFLOW STEPPER NAVIGATION */}
+      {/* STAGE NAVIGATION STEPPER */}
       <StageNavigation
         currentStage={stage}
-        onSelectStage={(s) => navigateTo(s)}
+        onSelectStage={(s) => {
+          if (s === "WELCOME") navigateTo("WELCOME", "awaiting-start");
+          else if (s === "SYSTEM_CONFIG") navigateTo("SYSTEM_CONFIG", "asking-process-count");
+          else if (s === "EXPLORING_3D") navigateTo("EXPLORING_3D", "exploring-3d");
+          else if (s === "ALLOCATION_INPUT") navigateTo("ALLOCATION_INPUT", "awaiting-matrix-choice");
+          else if (s === "SAFETY_ANALYSIS") navigateTo("SAFETY_ANALYSIS", "analyzing-safety");
+          else if (s === "SIMULATION_3D") navigateTo("SIMULATION_3D", "explaining-execution");
+        }}
         canNavigateTo={canNavigateTo}
       />
 
@@ -301,8 +525,7 @@ export default function App() {
               Reset Simulation to Initial State?
             </div>
             <p className="modal-desc">
-              All custom process names, resource names, and matrix values will
-              be restored to defaults. Are you sure you want to proceed?
+              All custom process counts, resource counts, and matrix values will be reset. Are you sure?
             </p>
             <div className="modal-buttons">
               <button
@@ -315,7 +538,12 @@ export default function App() {
               <button
                 type="button"
                 className="primary-button danger-btn"
-                onClick={handleGlobalReset}
+                onClick={() => {
+                  setShowResetModal(false);
+                  setModel(structuredClone(CLASSIC_5X3_PRESET));
+                  setIsAskingProcess(true);
+                  navigateTo("WELCOME", "awaiting-start", "Simulation reset to initial state. Say Start to begin.");
+                }}
               >
                 Confirm Reset
               </button>
@@ -329,49 +557,64 @@ export default function App() {
         {stage === "WELCOME" && (
           <WelcomeStage
             dialogue={dialogue}
-            onStartCustom={() => navigateTo("SYSTEM_CONFIG")}
+            workflowState={workflowState}
+            visualState={assistantVisualState}
+            isMuted={isMuted}
+            isListening={isListening}
+            isSpeaking={isSpeaking}
+            lastTranscript={lastTranscript}
+            lastCommandStatus={lastCommandStatus}
+            onToggleMute={() => {
+              const nextMute = !isMuted;
+              setIsMuted(nextMute);
+              speechManager.setMuted(nextMute);
+            }}
+            onReplayDialogue={() => announceSpeech(dialogue)}
+            onStartCustom={() => {
+              setIsAskingProcess(true);
+              navigateTo("SYSTEM_CONFIG", "asking-process-count");
+            }}
             onLoadClassic={() => {
               setModel(structuredClone(CLASSIC_5X3_PRESET));
-              navigateTo(
-                "SAFETY_ANALYSIS",
-                "Classic 5-process, 3-resource example loaded. Let's inspect the safety sequence.",
-              );
+              navigateTo("SAFETY_ANALYSIS", "analyzing-safety", "Classic 5 processes and 3 resources dataset loaded. Let's analyze safety.");
             }}
             onLoadUnsafe={() => {
               setModel(structuredClone(UNSAFE_PRESET));
-              navigateTo(
-                "SAFETY_ANALYSIS",
-                "Unsafe state loaded. Notice how the safety algorithm detects deadlock risk.",
-              );
+              navigateTo("SAFETY_ANALYSIS", "analyzing-safety", "Unsafe state loaded. Notice how the safety algorithm detects deadlock risk.");
             }}
-            onVoiceCommand={handleVoiceCommand}
+            onVoiceCommandSubmit={handleVoiceCommand}
           />
         )}
 
         {stage === "SYSTEM_CONFIG" && (
           <SystemConfigStage
-            initialProcessCount={model.processCount}
-            initialResourceCount={model.resourceCount}
-            onConfirm={handleDimensionsConfirm}
-            onBack={() => navigateTo("WELCOME")}
-          />
-        )}
-
-        {stage === "PROCESS_NAMING" && (
-          <ProcessNamingStage
             processCount={model.processCount}
-            initialNames={model.processNames}
-            onConfirm={handleProcessNamesConfirm}
-            onBack={() => navigateTo("SYSTEM_CONFIG")}
+            resourceCount={model.resourceCount}
+            isAskingProcess={isAskingProcess}
+            onProcessCountChange={(count) => {
+              setModel((prev) => generateDeterministicPreset(count, prev.resourceCount));
+            }}
+            onResourceCountChange={(rCount) => {
+              setModel((prev) => generateDeterministicPreset(prev.processCount, rCount));
+            }}
+            onConfirm={() => {
+              navigateTo("EXPLORING_3D", "exploring-3d");
+            }}
+            onBack={() => navigateTo("WELCOME", "awaiting-start")}
+            errorMessage={configErrorMessage}
           />
         )}
 
-        {stage === "RESOURCE_NAMING" && (
-          <ResourceNamingStage
-            resourceCount={model.resourceCount}
-            initialNames={model.resourceNames}
-            onConfirm={handleResourceNamesConfirm}
-            onBack={() => navigateTo("PROCESS_NAMING")}
+        {stage === "EXPLORING_3D" && (
+          <Exploring3DStage
+            model={model}
+            safetyResult={safetyResult}
+            onNext={() => navigateTo("ALLOCATION_INPUT", "awaiting-matrix-choice")}
+            onBack={() => {
+              setIsAskingProcess(false);
+              navigateTo("SYSTEM_CONFIG", "asking-resource-count");
+            }}
+            resourceColors={RESOURCE_COLOR_PALETTE}
           />
         )}
 
@@ -379,21 +622,11 @@ export default function App() {
           <MatrixEditorStage
             model={model}
             onUpdateModel={setModel}
-            onAnalyze={() => {
-              const res = safetyResult;
-              const msg = res?.isSafe
-                ? "The system is in a safe state! A valid safe execution sequence was verified."
-                : "The system is in an unsafe state. No execution order guarantees avoidance of deadlock.";
-              navigateTo("SAFETY_ANALYSIS", msg);
-            }}
-            onBack={() => navigateTo("RESOURCE_NAMING")}
+            onAnalyze={() => navigateTo("SAFETY_ANALYSIS", "analyzing-safety")}
+            onSkip={() => navigateTo("SAFETY_ANALYSIS", "analyzing-safety")}
+            onBack={() => navigateTo("EXPLORING_3D", "exploring-3d")}
             onReset={() => {
-              setModel((prev) => ({
-                ...prev,
-                allocation: createEmptyMatrix(prev.processCount, prev.resourceCount, 0),
-                max: createEmptyMatrix(prev.processCount, prev.resourceCount, 0),
-                available: createEmptyVector(prev.resourceCount, 1),
-              }));
+              setModel((prev) => generateDeterministicPreset(prev.processCount, prev.resourceCount));
             }}
             resourceColors={RESOURCE_COLOR_PALETTE}
           />
@@ -402,13 +635,11 @@ export default function App() {
         {stage === "SAFETY_ANALYSIS" && (
           <SafetyAnalysisStage
             model={model}
-            onLaunch3D={() => navigateTo("SIMULATION_3D")}
-            onBackToMatrices={() => navigateTo("ALLOCATION_INPUT")}
+            onLaunch3D={() => navigateTo("SIMULATION_3D", "explaining-execution")}
+            onBackToMatrices={() => navigateTo("ALLOCATION_INPUT", "awaiting-matrix-choice")}
             onApplyRequest={(newModel) => {
               setModel(newModel);
-              setDialogue(
-                "Resource request granted! Allocation and Available have been updated and safety verified.",
-              );
+              announceSpeech("Resource request granted! Allocation and Available have been updated and verified safe.");
             }}
             resourceColors={RESOURCE_COLOR_PALETTE}
           />
@@ -419,7 +650,7 @@ export default function App() {
             fallback={
               <div className="scene-loading-placeholder">
                 <Activity size={32} className="spin-slow" />
-                <span>Initializing 3D Resource Universe...</span>
+                <span>Initializing 3D Universe...</span>
               </div>
             }
           >
@@ -427,50 +658,81 @@ export default function App() {
               <Simulation3DStage
                 model={model}
                 safetyResult={safetyResult}
-                onBackToAnalysis={() => navigateTo("SAFETY_ANALYSIS")}
-                onBackToMatrices={() => navigateTo("ALLOCATION_INPUT")}
+                onBackToAnalysis={() => navigateTo("SAFETY_ANALYSIS", "analyzing-safety")}
+                onBackToMatrices={() => navigateTo("ALLOCATION_INPUT", "awaiting-matrix-choice")}
+                onExitSession={() => {
+                  speechManager.stopSpeaking();
+                  speechManager.stopListening();
+                  setIsListening(false);
+                  setIsSpeaking(false);
+                  setStage("SESSION_ENDED");
+                  setWorkflowState("session-ended");
+                  announceSpeech(STAGE_DIALOGUES.SESSION_ENDED);
+                }}
                 resourceColors={RESOURCE_COLOR_PALETTE}
               />
             )}
           </Suspense>
         )}
+
+        {stage === "SESSION_ENDED" && (
+          <SessionEndedStage
+            onRestart={() => {
+              setModel(structuredClone(CLASSIC_5X3_PRESET));
+              setIsAskingProcess(true);
+              handleActivateVoice();
+            }}
+          />
+        )}
       </div>
 
       {/* FLOATING LISA ASSISTANT (Stages 2 through 7) */}
-      {stage !== "WELCOME" && (
+      {stage !== "WELCOME" && stage !== "SESSION_ENDED" && (
         <LisaAssistant
           dialogue={dialogue}
           isWelcomeStage={false}
-          onVoiceCommand={handleVoiceCommand}
+          visualState={assistantVisualState}
+          workflowState={workflowState}
+          isMuted={isMuted}
+          isListening={isListening}
+          isSpeaking={isSpeaking}
+          lastTranscript={lastTranscript}
+          lastCommandStatus={lastCommandStatus}
+          onToggleMute={() => {
+            const nextMute = !isMuted;
+            setIsMuted(nextMute);
+            speechManager.setMuted(nextMute);
+          }}
+          onReplayDialogue={() => announceSpeech(dialogue)}
+          onVoiceCommandSubmit={handleVoiceCommand}
           onAdvanceStage={() => {
-            if (stage === "SYSTEM_CONFIG") navigateTo("PROCESS_NAMING");
-            else if (stage === "PROCESS_NAMING") navigateTo("RESOURCE_NAMING");
-            else if (stage === "RESOURCE_NAMING") navigateTo("ALLOCATION_INPUT");
-            else if (stage === "ALLOCATION_INPUT" && canNavigateTo("SAFETY_ANALYSIS"))
-              navigateTo("SAFETY_ANALYSIS");
-            else if (stage === "SAFETY_ANALYSIS" && canNavigateTo("SIMULATION_3D"))
-              navigateTo("SIMULATION_3D");
+            if (stage === "SYSTEM_CONFIG") navigateTo("EXPLORING_3D", "exploring-3d");
+            else if (stage === "EXPLORING_3D") navigateTo("ALLOCATION_INPUT", "awaiting-matrix-choice");
+            else if (stage === "ALLOCATION_INPUT") navigateTo("SAFETY_ANALYSIS", "analyzing-safety");
+            else if (stage === "SAFETY_ANALYSIS") navigateTo("SIMULATION_3D", "explaining-execution");
           }}
           hintActionText={
             stage === "ALLOCATION_INPUT"
-              ? "Analyze"
-              : stage === "SAFETY_ANALYSIS"
-                ? "3D View"
-                : "Next"
+              ? "Say 'Next'"
+              : stage === "EXPLORING_3D"
+                ? "Say 'Next'"
+                : stage === "SAFETY_ANALYSIS"
+                  ? "Say 'Next'"
+                  : "Say 'Next'"
           }
         />
       )}
 
-      {/* FOOTER */}
+      {/* LIGHT-THEME FOOTER */}
       <footer className="app-footer">
         <div className="footer-left">
           <span>KERNEL 3D</span>
           <span className="footer-dot">/</span>
-          <span>BANKER'S ALGORITHM SCIENTIFIC SIMULATOR</span>
+          <span>VOICE-FIRST BANKER&apos;S ALGORITHM LABORATORY</span>
         </div>
         <div className="footer-right">
-          <span>GUIDED BY LISA AI</span>
-          <span className="footer-dot">·</span>
+          <span>AI GUIDE: LISA</span>
+          <span className="footer-dot">&bull;</span>
           <span>DIJKSTRA DEADLOCK AVOIDANCE ENGINE</span>
         </div>
       </footer>
