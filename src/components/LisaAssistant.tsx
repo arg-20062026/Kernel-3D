@@ -14,6 +14,7 @@ import {
   HelpCircle,
 } from "lucide-react";
 import lisaAvatarUrl from "../assets/lisa-avatar.jpg";
+import Lisa3DCharacter from "../scene3d/Lisa3DCharacter";
 import type { VoiceWorkflowState } from "../types/simulation";
 
 export type AssistantVisualState =
@@ -88,17 +89,12 @@ export default function LisaAssistant({
     return (
       <div className="lisa-welcome-hero" role="region" aria-label="Lisa AI Guide">
         <div className="lisa-avatar-wrapper large">
-          <div
-            className={`lisa-avatar-ring ${isSpeaking ? "speaking" : ""} ${
-              isListening ? "listening" : ""
-            }`}
-          >
-            <img
-              src={lisaAvatarUrl}
-              alt="Lisa - Virtual AI Guide"
-              className="lisa-avatar-img"
-            />
-          </div>
+          <Lisa3DCharacter
+            mode="hero"
+            isSpeaking={isSpeaking}
+            isListening={isListening}
+            isMuted={isMuted}
+          />
           <div className="lisa-status-badge">
             <Radio size={12} className={isSpeaking || isListening ? "pulse" : ""} />
             <span>{statusLabel}</span>
@@ -196,16 +192,12 @@ export default function LisaAssistant({
         <div className="lisa-card">
           <div className="lisa-card-header">
             <div className="lisa-header-identity">
-              <div className="lisa-mini-avatar">
-                <img
-                  src={lisaAvatarUrl}
-                  alt="Lisa"
-                  className={`mini-avatar-img ${isSpeaking ? "pulse-border" : ""}`}
-                />
-                <span
-                  className={`status-indicator ${
-                    isSpeaking ? "speaking" : isListening ? "listening" : "idle"
-                  }`}
+              <div className="lisa-mini-avatar-3d">
+                <Lisa3DCharacter
+                  mode="compact"
+                  isSpeaking={isSpeaking}
+                  isListening={isListening}
+                  isMuted={isMuted}
                 />
               </div>
               <div>

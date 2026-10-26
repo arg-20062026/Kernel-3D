@@ -73,8 +73,8 @@ export default function Exploring3DStage({
             <span className="eyebrow">STAGE 03 / SPATIAL TOPOLOGY</span>
             <h2>3D Resource Universe</h2>
             <p className="panel-description">
-              Processes are represented by futuristic boxes ({model.processCount} units),
-              and resource classes are represented by glowing spheres ({model.resourceCount} types).
+              Processes are represented by futuristic computational modules ({model.processCount} pods),
+              and resource classes are represented by glowing energy reactor cores ({model.resourceCount} types).
             </p>
           </div>
           <div className="header-action-group">
@@ -127,7 +127,7 @@ export default function Exploring3DStage({
 
       <div className="scene-legend-bar">
         <div className="legend-section">
-          <span className="legend-heading">RESOURCES (SPHERES):</span>
+          <span className="legend-heading">RESOURCES (ENERGY CORES):</span>
           <div className="legend-items">
             {model.resourceNames.map((rName, j) => {
               const color = resourceColors[j % resourceColors.length];
@@ -142,7 +142,7 @@ export default function Exploring3DStage({
         </div>
 
         <div className="legend-section">
-          <span className="legend-heading">PROCESSES (BOXES):</span>
+          <span className="legend-heading">PROCESSES (COMPUTATIONAL PODS):</span>
           <div className="legend-items">
             {model.processNames.map((pName, i) => (
               <span key={i} className="legend-pill">
