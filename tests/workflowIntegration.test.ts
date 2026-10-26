@@ -31,7 +31,7 @@ describe("KERNEL 3D Guided Workflow & System Integration", () => {
     });
 
     expect(STAGE_DIALOGUES.WELCOME).toContain(
-      "Hi, I'm Lisa, welcome to Banker's Algorithm Simulation. Please allow microphone access to proceed.",
+      "Hi, I'm Lisa. Say Start to proceed.",
     );
     expect(STAGE_DIALOGUES.SYSTEM_CONFIG).toContain(
       "Cool. We need the number of processes. Tell me how many processes you want.",

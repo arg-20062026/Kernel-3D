@@ -40,7 +40,6 @@ import MatrixEditorStage from "./components/MatrixEditorStage";
 import SafetyAnalysisStage from "./components/SafetyAnalysisStage";
 import SessionEndedStage from "./components/SessionEndedStage";
 import LisaAssistant, { type AssistantVisualState } from "./components/LisaAssistant";
-import VoiceActivationOverlay from "./components/VoiceActivationOverlay";
 import "./App.css";
 
 // Lazy load 3D Execution Stage to keep initial bundle ultra-lean
@@ -60,13 +59,16 @@ const RESOURCE_COLOR_PALETTE = [
 export default function App() {
   const [stage, setStage] = useState<SimulationStage>("WELCOME");
   const [workflowState, setWorkflowState] =
-    useState<VoiceWorkflowState>("awaiting-activation");
+    useState<VoiceWorkflowState>("awaiting-start");
   const [model, setModel] = useState<SimulationModel>(() =>
     structuredClone(CLASSIC_5X3_PRESET),
   );
   const [dialogue, setDialogue] = useState<string>(STAGE_DIALOGUES.WELCOME);
 
   const [isActivated, setIsActivated] = useState<boolean>(false);
+  const [autoplayBlocked, setAutoplayBlocked] = useState<boolean>(
+    () => !speechManager.isTTSSupported(),
+  );
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [isListening, setIsListening] = useState<boolean>(false);
   const [isSpeaking, setIsSpeaking] = useState<boolean>(false);
@@ -119,15 +121,11 @@ export default function App() {
   }, [isMuted]);
 
   const handleVoiceCommandRef = useRef<(rawCommand: string) => void>(() => {});
+  const greetingAttemptedRef = useRef(false);
+  const isTransitioningRef = useRef(false);
 
-  // Single-gesture audio and mic activator
-  const handleActivateVoice = async () => {
-    await speechManager.unlockAudioContext();
-    setIsActivated(true);
-    setWorkflowState("awaiting-start");
-    setStage("WELCOME");
-
-    // Start continuous speech recognition
+  // Reusable listener initializer
+  const startListeningSession = useCallback(() => {
     speechManager.startListening({
       onStart: () => setIsListening(true),
       onResult: (transcript, isFinal) => {
@@ -146,10 +144,50 @@ export default function App() {
         setIsListening(speechManager.getIsListening());
       },
     });
+  }, []);
 
-    // Speak welcome greeting
+  // Single-gesture audio and mic activator when autoplay blocked
+  const handleActivateVoice = useCallback(async () => {
+    await speechManager.unlockAudioContext();
+    setIsActivated(true);
+    setAutoplayBlocked(false);
+    setWorkflowState("awaiting-start");
+    setStage("WELCOME");
+
+    startListeningSession();
     announceSpeech(STAGE_DIALOGUES.WELCOME);
-  };
+  }, [announceSpeech, startListeningSession]);
+
+  // AUTOMATIC GREETING ON INITIAL LOAD
+  useEffect(() => {
+    if (greetingAttemptedRef.current) return;
+    greetingAttemptedRef.current = true;
+
+    const greeting = STAGE_DIALOGUES.WELCOME;
+    setDialogue(greeting);
+
+    // Attempt automatic spoken greeting on first load
+    if (speechManager.isTTSSupported()) {
+      speechManager.speak(greeting, {
+        onStart: () => {
+          setIsSpeaking(true);
+          setIsActivated(true);
+          setAutoplayBlocked(false);
+        },
+        onEnd: () => setIsSpeaking(false),
+        onError: () => {
+          setIsSpeaking(false);
+          // Browser audio autoplay policy blocked playback until user gesture
+          setAutoplayBlocked(true);
+        },
+      });
+    }
+
+    // Attempt listening if browser permissions allow
+    if (speechManager.isSTTSupported()) {
+      startListeningSession();
+    }
+  }, [startListeningSession]);
 
   // Stage transition helper
   const navigateTo = (nextStage: SimulationStage, nextWorkflow: VoiceWorkflowState, promptText?: string) => {
@@ -196,6 +234,9 @@ export default function App() {
     // STATE: awaiting-start or WELCOME
     if (curWorkflow === "awaiting-start" || curStage === "WELCOME") {
       if (isExactCommand(clean, "start")) {
+        if (isTransitioningRef.current) return;
+        isTransitioningRef.current = true;
+
         setLastCommandStatus({
           type: "accepted",
           message: "Command 'Start' accepted. Moving to Dimensions.",
@@ -206,6 +247,9 @@ export default function App() {
           "asking-process-count",
           "Cool. We need the number of processes. Tell me how many processes you want.",
         );
+        setTimeout(() => {
+          isTransitioningRef.current = false;
+        }, 1200);
         return;
       }
       if (clean.includes("classic") || clean.includes("textbook")) {
@@ -437,14 +481,6 @@ export default function App() {
 
   return (
     <main className="app-shell light-theme">
-      {/* ONE-TIME VOICE & MICROPHONE ACTIVATION OVERLAY */}
-      {!isActivated && (
-        <VoiceActivationOverlay
-          onActivate={handleActivateVoice}
-          isActivating={false}
-        />
-      )}
-
       {/* LIGHT-THEME GLOBAL TOPBAR */}
       <header className="topbar">
         <div
@@ -562,6 +598,8 @@ export default function App() {
             isMuted={isMuted}
             isListening={isListening}
             isSpeaking={isSpeaking}
+            isActivated={isActivated}
+            autoplayBlocked={autoplayBlocked}
             lastTranscript={lastTranscript}
             lastCommandStatus={lastCommandStatus}
             onToggleMute={() => {
@@ -583,6 +621,7 @@ export default function App() {
               navigateTo("SAFETY_ANALYSIS", "analyzing-safety", "Unsafe state loaded. Notice how the safety algorithm detects deadlock risk.");
             }}
             onVoiceCommandSubmit={handleVoiceCommand}
+            onActivateVoice={handleActivateVoice}
           />
         )}
 

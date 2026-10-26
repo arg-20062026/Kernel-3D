@@ -2,7 +2,7 @@ import type { SimulationStage, VoiceWorkflowState } from "../types/simulation";
 
 export const STAGE_DIALOGUES: Record<SimulationStage, string> = {
   WELCOME:
-    "Hi, I'm Lisa, welcome to Banker's Algorithm Simulation. Please allow microphone access to proceed.",
+    "Hi, I'm Lisa. Say Start to proceed.",
   SYSTEM_CONFIG:
     "Cool. We need the number of processes. Tell me how many processes you want.",
   PROCESS_NAMING:
@@ -23,13 +23,13 @@ export const STAGE_DIALOGUES: Record<SimulationStage, string> = {
 
 export const WORKFLOW_PROMPTS: Record<VoiceWorkflowState, string> = {
   "awaiting-activation":
-    "Hi, I'm Lisa, welcome to Banker's Algorithm Simulation. Please enable voice and microphone to proceed.",
+    "Hi, I'm Lisa. Say Start to proceed.",
   "requesting-microphone":
     "Please grant microphone permission in your browser prompt.",
   welcoming:
-    "Hi, I'm Lisa, welcome to Banker's Algorithm Simulation. Please allow microphone access to proceed.",
+    "Hi, I'm Lisa. Say Start to proceed.",
   "awaiting-start":
-    "Good, say start to proceed.",
+    "Hi, I'm Lisa. Say Start to proceed.",
   "asking-process-count":
     "Cool. We need the number of processes. Tell me how many processes you want.",
   "asking-resource-count":

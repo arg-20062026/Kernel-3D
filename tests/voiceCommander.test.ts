@@ -53,6 +53,9 @@ describe("Voice Commander & Input Normalization", () => {
 
   it("correctly identifies exact primary commands without substring false positives", () => {
     expect(isExactCommand("start", "start")).toBe(true);
+    expect(isExactCommand("start please", "start")).toBe(true);
+    expect(isExactCommand("let's start", "start")).toBe(true);
+    expect(isExactCommand("lets start", "start")).toBe(true);
     expect(isExactCommand("start simulation", "start")).toBe(true);
     expect(isExactCommand("restart", "start")).toBe(false);
     expect(isExactCommand("starting line", "start")).toBe(false);

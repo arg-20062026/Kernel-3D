@@ -9,6 +9,8 @@ interface WelcomeStageProps {
   isMuted: boolean;
   isListening: boolean;
   isSpeaking: boolean;
+  isActivated?: boolean;
+  autoplayBlocked?: boolean;
   lastTranscript?: string;
   lastCommandStatus?: {
     type: "accepted" | "rejected" | "clarify";
@@ -20,6 +22,7 @@ interface WelcomeStageProps {
   onLoadClassic: () => void;
   onLoadUnsafe: () => void;
   onVoiceCommandSubmit: (cmd: string) => void;
+  onActivateVoice?: () => void;
 }
 
 export default function WelcomeStage({
@@ -29,6 +32,8 @@ export default function WelcomeStage({
   isMuted,
   isListening,
   isSpeaking,
+  isActivated = false,
+  autoplayBlocked = false,
   lastTranscript,
   lastCommandStatus,
   onToggleMute,
@@ -37,6 +42,7 @@ export default function WelcomeStage({
   onLoadClassic,
   onLoadUnsafe,
   onVoiceCommandSubmit,
+  onActivateVoice,
 }: WelcomeStageProps) {
   return (
     <div className="welcome-stage-container">
@@ -48,12 +54,15 @@ export default function WelcomeStage({
         isMuted={isMuted}
         isListening={isListening}
         isSpeaking={isSpeaking}
+        isActivated={isActivated}
+        autoplayBlocked={autoplayBlocked}
         lastTranscript={lastTranscript}
         lastCommandStatus={lastCommandStatus}
         onToggleMute={onToggleMute}
         onReplayDialogue={onReplayDialogue}
         onVoiceCommandSubmit={onVoiceCommandSubmit}
         onAdvanceStage={onStartCustom}
+        onActivateVoice={onActivateVoice}
         hintActionText="Say 'Start'"
       />
 

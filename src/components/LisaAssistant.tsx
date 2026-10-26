@@ -37,6 +37,8 @@ interface LisaAssistantProps {
   isMuted: boolean;
   isListening: boolean;
   isSpeaking: boolean;
+  isActivated?: boolean;
+  autoplayBlocked?: boolean;
   lastTranscript?: string;
   lastCommandStatus?: {
     type: "accepted" | "rejected" | "clarify";
@@ -46,6 +48,7 @@ interface LisaAssistantProps {
   onReplayDialogue: () => void;
   onVoiceCommandSubmit: (cmd: string) => void;
   onAdvanceStage?: () => void;
+  onActivateVoice?: () => void;
   hintActionText?: string;
 }
 
@@ -56,12 +59,15 @@ export default function LisaAssistant({
   isMuted,
   isListening,
   isSpeaking,
+  isActivated = false,
+  autoplayBlocked = false,
   lastTranscript,
   lastCommandStatus,
   onToggleMute,
   onReplayDialogue,
   onVoiceCommandSubmit,
   onAdvanceStage,
+  onActivateVoice,
   hintActionText,
 }: LisaAssistantProps) {
   const [isMinimized, setIsMinimized] = useState(false);
@@ -108,6 +114,22 @@ export default function LisaAssistant({
           </div>
           <h2 className="lisa-name-title">Lisa</h2>
           <p className="lisa-speech-balloon">{dialogue}</p>
+
+          {(!isActivated || autoplayBlocked) && onActivateVoice && (
+            <div className="lisa-autoplay-action-wrap">
+              <button
+                type="button"
+                className="primary-button lisa-enable-audio-btn"
+                onClick={onActivateVoice}
+              >
+                <Volume2 size={18} />
+                <span>Enable Lisa&apos;s Voice &amp; Microphone</span>
+              </button>
+              <span className="autoplay-hint">
+                Click to unlock browser voice output and speak commands.
+              </span>
+            </div>
+          )}
 
           <div className="lisa-live-transcript-bar">
             <Mic size={14} className={isListening ? "mic-glow" : ""} />

@@ -2,6 +2,7 @@ import React, { useRef, useMemo, Suspense } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { useGLTF, Float } from "@react-three/drei";
 import * as THREE from "three";
+import { clone as cloneSkeleton } from "three/examples/jsm/utils/SkeletonUtils.js";
 import type { SkinnedMesh, Bone, Group } from "three";
 import lisaAvatarFallbackUrl from "../assets/lisa-avatar.jpg";
 
@@ -23,7 +24,10 @@ function LisaModel({
   isListening: boolean;
 }) {
   const gltf = useGLTF("/models/lisa.glb");
-  const clonedScene = useMemo(() => gltf.scene.clone(true), [gltf.scene]);
+  const clonedScene = useMemo(
+    () => cloneSkeleton(gltf.scene) as Group,
+    [gltf.scene],
+  );
   const groupRef = useRef<Group>(null);
   const bonesRef = useRef<{
     head: Bone | null;
@@ -217,6 +221,9 @@ class WebGLBoundary extends React.Component<
   static getDerivedStateFromError() {
     return { hasError: true };
   }
+  override componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.warn("Lisa 3D Character WebGL context error:", error, errorInfo);
+  }
   override render() {
     if (this.state.hasError) {
       return this.props.fallback;
@@ -231,12 +238,12 @@ export default function Lisa3DCharacter({
   isListening,
   isMuted = false,
 }: Lisa3DCharacterProps) {
-  // Camera framing: hero shows head & upper torso; compact is closer portrait
+  // Camera framing: hero shows head & upper torso centered; compact is closer portrait
   const cameraConfig = useMemo(() => {
     if (mode === "hero") {
-      return { position: [0, 0.04, 0.96] as [number, number, number], fov: 38 };
+      return { position: [0, 0.08, 0.92] as [number, number, number], fov: 36 };
     }
-    return { position: [0, 0.06, 0.82] as [number, number, number], fov: 34 };
+    return { position: [0, 0.08, 0.82] as [number, number, number], fov: 32 };
   }, [mode]);
 
   const auraColor = isSpeaking

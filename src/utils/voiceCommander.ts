@@ -192,12 +192,20 @@ export function isExactCommand(
 
   switch (command) {
     case "start":
+      if (norm.includes("restart")) return false;
       return (
         norm === "start" ||
-        norm === "start simulation" ||
+        norm === "start please" ||
+        norm === "please start" ||
         norm === "lets start" ||
+        norm === "let's start" ||
+        norm === "start simulation" ||
+        norm === "start the simulation" ||
         norm === "begin" ||
-        norm === "begin simulation"
+        norm === "begin simulation" ||
+        /^(?:please\s+|let(?:'?s)?\s+)?start(?:\s+please|\s+now|\s+simulation|\s+the\s+simulation)?$/i.test(
+          norm,
+        )
       );
     case "next":
       return norm === "next" || norm === "continue" || norm === "proceed" || norm === "go next";
